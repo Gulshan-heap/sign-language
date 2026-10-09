@@ -22,17 +22,30 @@ def nb(cells):
 
 
 SETUP = ("code", '''
-# Code bundle: upload dist/slr_code.zip as a Kaggle Dataset named "slr-code", then add it as input.
-import glob, os, shutil, subprocess, sys
-src = (glob.glob("/kaggle/input/slr-code*") or glob.glob("/content/slr_code"))[0]
-shutil.copytree(src, "/kaggle/working/code" if os.path.exists("/kaggle") else "/content/code", dirs_exist_ok=True)
-WORK = "/kaggle/working" if os.path.exists("/kaggle") else "/content"
+# Finds the uploaded "slr-code" dataset wherever Kaggle mounts it (the path differs between Kaggle versions).
+import glob, os, shutil, subprocess, sys, zipfile
+ON_KAGGLE = os.path.exists("/kaggle/input")
+WORK = "/kaggle/working" if ON_KAGGLE else "/content"
 CODE = f"{WORK}/code"
+hits = glob.glob("/kaggle/input/**/slr/__init__.py", recursive=True) + glob.glob("/content/slr_code/**/slr/__init__.py", recursive=True)
+if hits:
+    shutil.copytree(os.path.dirname(os.path.dirname(hits[0])), CODE, dirs_exist_ok=True)
+else:
+    zips = glob.glob("/kaggle/input/**/slr_code.zip", recursive=True) + glob.glob("/content/**/slr_code.zip", recursive=True)
+    if zips:
+        zipfile.ZipFile(zips[0]).extractall(CODE)
+    else:
+        print("slr-code NOT FOUND. Add it: right sidebar -> + Add Input -> Your Datasets -> slr-code. Currently attached:")
+        for p in sorted(glob.glob("/kaggle/input/*") + glob.glob("/kaggle/input/*/*")):
+            print("  ", p)
+        raise SystemExit("Attach the slr-code dataset, then run this cell again.")
 os.chdir(CODE)
+print("code ready in", CODE, os.listdir(CODE))
 # mediapipe 0.10.14 still has the `mp.solutions` API we use. If pip complains about numpy, run
 # `!pip install "numpy<2"` and restart the session once.
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "mediapipe==0.10.14", "remotezip", "opencv-python-headless"])
 ''')
+
 
 DAY1 = nb([
     ("markdown", "# Day 1 - letters + INCLUDE keypoints (CPU only, Internet ON)\n"
@@ -43,7 +56,10 @@ DAY1 = nb([
                  "Open the *Input* panel (right sidebar), hover the dataset, click the copy-path icon, paste below. "
                  "Set `ISL_IMAGES = None` if you have no ISL letter images yet - ASL still runs, ISL letters can be added later."),
     ("code", '''
-ASL_IMAGES = "/kaggle/input/asl-alphabet"          # class-folder level is auto-detected
+import glob
+_asl = [p for p in glob.glob("/kaggle/input/**/*asl-alphabet*", recursive=True) if os.path.isdir(p)]
+print("ASL alphabet candidates:", _asl)
+ASL_IMAGES = min(_asl, key=len)                      # shortest = the dataset root; class folders are auto-detected
 ISL_IMAGES = None                                    # e.g. "/kaggle/input/<your-isl-alphabet-dataset>"
 for lang, root in [("asl", ASL_IMAGES), ("isl", ISL_IMAGES)]:
     if root is None:
