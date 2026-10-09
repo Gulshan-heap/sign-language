@@ -7,7 +7,7 @@ Training runs on Kaggle/Colab, the demo runs on your laptop.
 ```
 slr/            shared library (landmarks, word model, inference)
 scripts/        letters.py  include_extract.py  asl_words.py  train_words.py   (run on Kaggle or locally)
-notebooks/      day1_setup_letters_include.ipynb  day2_words.ipynb              (generated)
+notebooks/      day1_setup_letters_include.ipynb  day2a_asl_words.ipynb  day2b_isl_words.ipynb  (generated)
 demo/app.py     OpenCV webcam demo
 tools/          record_clips.py  evaluate_clips.py  make_notebooks.py
 models/         put the downloaded Kaggle output here
@@ -31,7 +31,7 @@ Kaggle -> Datasets -> New Dataset -> upload `dist/slr_code.zip`, name it **slr-c
    ~955 INCLUDE-50 videos** (~12 GB in total, never the 56 GB), extracts keypoints, deletes the video. Resumable.
 4. Save Version, then Output -> New Dataset (`models/`, `letters/`, `include50/`).
 
-## Day 2 (GPU only for the ISL cell) - `day2_words.ipynb`
+## Day 2 - `day2a_asl_words.ipynb` (CPU) and `day2b_isl_words.ipynb` (GPU) - one per teammate, see TEAM_TRAINING_GUIDE.md
 - **ASL**: `asl_words.py infer` on your 20-30 signs from the `asl-signs` competition (only those parquet files are read).
   Optional: `extract` + `train_words.py` to train just on those signs.
 - **ISL**: `train_words.py` on the INCLUDE-50 keypoints (T4, a few minutes).

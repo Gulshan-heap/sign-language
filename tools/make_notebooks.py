@@ -1,7 +1,7 @@
 """Generate the Kaggle/Colab notebooks and the code bundle to upload.
 
   python tools/make_notebooks.py
--> notebooks/day1_setup_letters_include.ipynb, notebooks/day2_words.ipynb, dist/slr_code.zip
+-> notebooks/day1_*.ipynb, day2a_asl_words.ipynb, day2b_isl_words.ipynb, dist/slr_code.zip
 """
 import json
 import zipfile
@@ -66,36 +66,58 @@ for lang, root in [("asl", ASL_IMAGES), ("isl", ISL_IMAGES)]:
                  "Commit the notebook (Save Version -> Save & Run All), then Output -> **New Dataset** to keep `models/`, `letters/`, `include50/`."),
 ])
 
-DAY2 = nb([
-    ("markdown", "# Day 2 - words (GPU session only for the ISL training cell)\nInputs: `slr-code`, your Day-1 output dataset, `209sontung/sign-language`, `asl-signs`."),
+DAY2_ASL = nb([
+    ("markdown", "# Day 2 (teammate A) - ASL words. CPU is enough; no Day-1 data needed.\n"
+                 "Inputs: `slr-code`, `209sontung/sign-language`, competition `asl-signs`. Internet ON."),
     SETUP,
-    ("markdown", "## ASL: pretrained inference on your chosen 20-30 signs (no training)"),
+    ("markdown", "## 1. Pretrained inference on the chosen signs (no training)\n"
+                 "Set `MODEL_DIR` to the pretrained-model folder shown in the sidebar (hover -> copy path)."),
     ("code", '''
 MODEL_DIR = "/kaggle/input/sign-language"
 SIGNS = "hello thankyou please yes no mom dad water eat drink go sleep happy sad like want home cat dog bird red blue green hungry sick".split()
-!python scripts/asl_words.py infer --model-dir $MODEL_DIR --data /kaggle/input/asl-signs --signs {" ".join(SIGNS)} --per-sign 20 --out $WORK/asl_pretrained_eval.json
+!python scripts/asl_words.py inspect --model-dir $MODEL_DIR
+!python scripts/asl_words.py infer --model-dir $MODEL_DIR --data /kaggle/input/asl-signs --signs {" ".join(SIGNS)} --per-sign 20 --out $WORK/models/asl_pretrained_eval.json
 '''),
-    ("markdown", "### Optional: train/fine-tune only on those signs (also the fallback if the pretrained weights won't load)"),
+    ("markdown", "## 2. Train only on those signs (run this if step 1 failed, or if the team lead asks)\n"
+                 "Also fine to run even if step 1 worked: we then compare both."),
     ("code", '''
 !python scripts/asl_words.py extract --data /kaggle/input/asl-signs --signs {" ".join(SIGNS)} --out $WORK/asl_words
 !python scripts/train_words.py --data $WORK/asl_words --out $WORK/models/asl_words.pt --epochs 120
 '''),
-    ("markdown", "## ISL: train on the INCLUDE-50 keypoints from Day 1 (enable GPU T4)"),
+    ("markdown", "## 3. Package for download\nAlso copy the pretrained model files so the demo can use them."),
     ("code", '''
-INCLUDE_KP = "/kaggle/input/REPLACE-WITH-DAY1-OUTPUT-DATASET/include50"   # or $WORK/include50 if same session
+!cp $MODEL_DIR/*.tflite $MODEL_DIR/*.json $WORK/models/ 2>/dev/null
+!cd $WORK && zip -r asl_models.zip models && ls -lh asl_models.zip
+'''),
+    ("markdown", "Then **Save Version -> Save & Run All**, open the Output tab and download `asl_models.zip`."),
+])
+
+DAY2_ISL = nb([
+    ("markdown", "# Day 2 (teammate B) - ISL words (needs the Day-1 output dataset)\n"
+                 "Inputs: `slr-code` and the Day-1 output dataset (`include50/` inside). Internet ON. "
+                 "Set the accelerator to **GPU T4** before the training cell."),
+    SETUP,
+    ("markdown", "## 1. Point at the Day-1 keypoints\n"
+                 "Edit `INCLUDE_KP`: the sidebar path of the Day-1 dataset + `/include50`. It should contain `train`, `val`, `test` folders."),
+    ("code", '''
+INCLUDE_KP = "/kaggle/input/REPLACE-WITH-DAY1-OUTPUT-DATASET/include50"
+!ls $INCLUDE_KP && ls $INCLUDE_KP/train | wc -l
+'''),
+    ("markdown", "## 2. Train (GPU T4, about 5-15 minutes)"),
+    ("code", '''
 !python scripts/train_words.py --data $INCLUDE_KP --out $WORK/models/isl_words.pt --epochs 150 --seeds 3
 '''),
-    ("markdown", "## Package the small models for download (a few MB each)"),
+    ("markdown", "## 3. Package for download (a few MB)"),
     ("code", '''
-!cp /kaggle/input/REPLACE-WITH-DAY1-OUTPUT-DATASET/models/*.joblib $WORK/models/ 2>/dev/null
-!cd $WORK && zip -r models.zip models && ls -lh models.zip
+!cd $WORK && zip -r isl_models.zip models && ls -lh isl_models.zip
 '''),
+    ("markdown", "Then **Save Version -> Save & Run All**, open the Output tab and download `isl_models.zip`."),
 ])
 
 
 def main():
     (ROOT / "notebooks").mkdir(exist_ok=True)
-    for name, book in (("day1_setup_letters_include", DAY1), ("day2_words", DAY2)):
+    for name, book in (("day1_setup_letters_include", DAY1), ("day2a_asl_words", DAY2_ASL), ("day2b_isl_words", DAY2_ISL)):
         (ROOT / "notebooks" / f"{name}.ipynb").write_text(json.dumps(book, indent=1))
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
