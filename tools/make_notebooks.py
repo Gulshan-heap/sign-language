@@ -27,11 +27,11 @@ import glob, os, shutil, subprocess, sys, zipfile
 ON_KAGGLE = os.path.exists("/kaggle/input")
 WORK = "/kaggle/working" if ON_KAGGLE else "/content"
 CODE = f"{WORK}/code"
-hits = glob.glob("/kaggle/input/**/slr/__init__.py", recursive=True) + glob.glob("/content/slr_code/**/slr/__init__.py", recursive=True)
+hits = [h for d in ("*", "*/*", "*/*/*") for h in glob.glob(f"/kaggle/input/{d}/slr/__init__.py")] + glob.glob("/content/slr_code/**/slr/__init__.py", recursive=True)  # shallow search: ASL Alphabet has ~87k files
 if hits:
     shutil.copytree(os.path.dirname(os.path.dirname(hits[0])), CODE, dirs_exist_ok=True)
 else:
-    zips = glob.glob("/kaggle/input/**/slr_code.zip", recursive=True) + glob.glob("/content/**/slr_code.zip", recursive=True)
+    zips = [h for d in ("*", "*/*", "*/*/*") for h in glob.glob(f"/kaggle/input/{d}/slr_code.zip")] + glob.glob("/content/**/slr_code.zip", recursive=True)
     if zips:
         zipfile.ZipFile(zips[0]).extractall(CODE)
     else:
@@ -57,7 +57,7 @@ DAY1 = nb([
                  "Set `ISL_IMAGES = None` if you have no ISL letter images yet - ASL still runs, ISL letters can be added later."),
     ("code", '''
 import glob
-_asl = [p for p in glob.glob("/kaggle/input/**/*asl-alphabet*", recursive=True) if os.path.isdir(p)]
+_asl = [p for d in ("*", "*/*", "*/*/*") for p in glob.glob(f"/kaggle/input/{d}") if "asl-alphabet" in p.lower() and os.path.isdir(p)]
 print("ASL alphabet candidates:", _asl)
 ASL_IMAGES = min(_asl, key=len)                      # shortest = the dataset root; class folders are auto-detected
 ISL_IMAGES = None                                    # e.g. "/kaggle/input/<your-isl-alphabet-dataset>"
