@@ -117,6 +117,18 @@ def cmd_train(a):
                 Path(a.out) / f"{a.lang}_letters.joblib")
     print("saved", Path(a.out) / f"{a.lang}_letters.joblib")
 
+    # Raspberry-Pi-friendly copy: plain numpy weights, so the Pi needs neither scikit-learn nor a matching version
+    mlp = models["mlp"]
+    mlp.fit(X[m["train"] | m["val"]], y[m["train"] | m["val"]])
+    print(f"numpy-export MLP test acc {mlp.score(X[m['test']], y[m['test']]):.4f}")
+    sc, net = mlp.steps[0][1], mlp.steps[1][1]
+    arrays = {"mean": sc.mean_, "scale": sc.scale_, "classes": np.array(classes), "n_hands": np.array(N_HANDS[a.lang]),
+              "n_layers": np.array(len(net.coefs_))}
+    for i, (w, b) in enumerate(zip(net.coefs_, net.intercepts_)):
+        arrays[f"w{i}"], arrays[f"b{i}"] = w, b
+    np.savez(Path(a.out) / f"{a.lang}_letters_np.npz", **arrays)
+    print("saved", Path(a.out) / f"{a.lang}_letters_np.npz", "(use this one on the Raspberry Pi)")
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

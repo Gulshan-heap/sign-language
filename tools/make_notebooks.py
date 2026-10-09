@@ -35,26 +35,24 @@ subprocess.run([sys.executable, "-m", "pip", "install", "-q", "mediapipe==0.10.1
 ''')
 
 DAY1 = nb([
-    ("markdown", "# Day 1 - setup + letters + INCLUDE keypoints (CPU only)\n"
-                 "Add inputs first (right sidebar): `slr-code`, ASL Alphabet (`grassknoted/asl-alphabet`), an ISL fingerspelling image "
-                 "dataset, the pretrained-ASL dataset (`209sontung/sign-language`), and the `asl-signs` competition. Internet ON."),
+    ("markdown", "# Day 1 - letters + INCLUDE keypoints (CPU only, Internet ON)\n"
+                 "Inputs needed: `slr-code`, ASL Alphabet (https://www.kaggle.com/datasets/grassknoted/asl-alphabet) and, optionally, an ISL "
+                 "alphabet image dataset. The pretrained-ASL smoke test and the `asl-signs` competition are NOT needed here: they belong to Day 2 (ASL)."),
     SETUP,
-    ("markdown", "## 1. Smoke-test the pretrained ASL weights on ONE clip (<= 1 hour; else switch to `abhinand5/isolated-sign-language-recognition`)"),
+    ("markdown", "## 1. Letters: ~300 images per letter -> hand landmarks -> classifier (minutes on CPU)\n"
+                 "Open the *Input* panel (right sidebar), hover the dataset, click the copy-path icon, paste below. "
+                 "Set `ISL_IMAGES = None` if you have no ISL letter images yet - ASL still runs, ISL letters can be added later."),
     ("code", '''
-MODEL_DIR = "/kaggle/input/sign-language"   # <- folder of the pretrained model dataset (check the sidebar)
-!python scripts/asl_words.py inspect --model-dir $MODEL_DIR
-!python scripts/asl_words.py infer --model-dir $MODEL_DIR --data /kaggle/input/asl-signs --signs hello --per-sign 1 --out $WORK/smoke.json
-'''),
-    ("markdown", "## 2. Letters: ~300 images per letter -> hand landmarks -> classifier (minutes on CPU)"),
-    ("code", '''
-ASL_IMAGES = "/kaggle/input/asl-alphabet"          # root of the ASL Alphabet dataset (class folder auto-detected)
-ISL_IMAGES = "/kaggle/input/REPLACE-WITH-ISL-FINGERSPELLING-DATASET"
+ASL_IMAGES = "/kaggle/input/asl-alphabet"          # class-folder level is auto-detected
+ISL_IMAGES = None                                    # e.g. "/kaggle/input/<your-isl-alphabet-dataset>"
 for lang, root in [("asl", ASL_IMAGES), ("isl", ISL_IMAGES)]:
+    if root is None:
+        print("skipping", lang); continue
     !python scripts/letters.py extract --images $root --lang $lang --out $WORK/letters --per-class 300 --workers 4
     !python scripts/letters.py train --lang $lang --data $WORK/letters --out $WORK/models
 '''),
-    ("markdown", "## 3. INCLUDE-50 keypoints (reads only the 50 signs' videos from each Zenodo part, deletes each video right after)\n"
-                 "Run `--list` first to see the parts. Re-running resumes where it stopped, so a session timeout costs nothing."),
+    ("markdown", "## 2. INCLUDE-50 keypoints (reads only the 50 signs' videos from each Zenodo part, deletes each video right after)\n"
+                 "Run `--list` first to check Internet/Zenodo. The second cell is the long one - use Save & Run All for it."),
     ("code", '''
 !python scripts/include_extract.py --out $WORK/include50 --list
 '''),
@@ -62,8 +60,8 @@ for lang, root in [("asl", ASL_IMAGES), ("isl", ISL_IMAGES)]:
 !python scripts/include_extract.py --out $WORK/include50 --workers 8 --stride 2
 !du -sh $WORK/include50
 '''),
-    ("markdown", "## 4. Save everything\n"
-                 "Commit the notebook (Save Version -> Save & Run All), then Output -> **New Dataset** to keep `models/`, `letters/`, `include50/`."),
+    ("markdown", "## 3. Save everything\n"
+                 "Save Version -> Save & Run All, then Output -> **New Dataset** to keep `models/`, `letters/`, `include50/`."),
 ])
 
 DAY2_ASL = nb([

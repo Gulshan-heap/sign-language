@@ -7,6 +7,34 @@ import numpy as np
 from .landmarks import hands_to_features
 
 
+class NumpyMLP:
+    """Forward pass of the exported scikit-learn MLP using only numpy."""
+
+    def __init__(self, path):
+        z = np.load(path)
+        self.mean, self.scale = z["mean"], z["scale"]
+        self.classes, self.n_hands = [str(c) for c in z["classes"]], int(z["n_hands"])
+        n = int(z["n_layers"])
+        self.layers = [(z[f"w{i}"], z[f"b{i}"]) for i in range(n)]
+
+    def predict_proba(self, f):
+        x = (f - self.mean) / self.scale
+        for i, (w, b) in enumerate(self.layers):
+            x = x @ w + b
+            if i < len(self.layers) - 1:
+                x = np.maximum(x, 0)
+        e = np.exp(x - x.max())
+        return e / e.sum()
+
+
+class SklearnWrap:
+    def __init__(self, d):
+        self.model, self.classes, self.n_hands = d["model"], d["classes"], d["n_hands"]
+
+    def predict_proba(self, f):
+        return self.model.predict_proba(f[None])[0]
+
+
 def full543(res):
     """Holistic result -> (543, 3) in Google-ISLR order (face, left hand, pose, right hand), NaN if missing."""
     def arr(l, n):
@@ -19,13 +47,12 @@ class Models:
     def __init__(self, d):
         d = Path(d)
         self.letters, self.words, self.tflite = {}, {}, None
-        try:
-            import joblib
-            for lang in ("asl", "isl"):
-                if (d / f"{lang}_letters.joblib").exists():
-                    self.letters[lang] = joblib.load(d / f"{lang}_letters.joblib")
-        except ImportError:
-            pass
+        for lang in ("asl", "isl"):
+            if (d / f"{lang}_letters_np.npz").exists():          # numpy-only model (works on a Raspberry Pi)
+                self.letters[lang] = NumpyMLP(d / f"{lang}_letters_np.npz")
+            elif (d / f"{lang}_letters.joblib").exists():
+                import joblib
+                self.letters[lang] = joblib.load(d / f"{lang}_letters.joblib")
         try:
             from .word_model import load_model
             for lang in ("asl", "isl"):
@@ -51,12 +78,14 @@ class Models:
 
     def letter(self, lang, hand_lists):
         m = self.letters[lang]
-        f = hands_to_features(hand_lists, m["n_hands"])
+        if isinstance(m, dict):
+            m = SklearnWrap(m)
+        f = hands_to_features(hand_lists, m.n_hands)
         if f is None:
             return None
-        p = m["model"].predict_proba(f[None])[0]
+        p = m.predict_proba(f)
         i = int(p.argmax())
-        return m["classes"][i], float(p[i])
+        return m.classes[i], float(p[i])
 
     def word(self, lang, kp67, kp543):
         if lang in self.words:
