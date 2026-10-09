@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from slr.landmarks import hands_to_features, hands_from_result, make_hands, mirror_hands  # noqa: E402
+from slr.landmarks import HandDetector, MODELS, hands_to_features, mirror_hands, model_path  # noqa: E402
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp"}
 N_HANDS = {"asl": 1, "isl": 2}
@@ -34,14 +34,14 @@ def find_class_root(root):
 
 def _extract_chunk(args):
     paths, n_hands = args
-    hands = make_hands(static=True, max_hands=n_hands)
+    hands = HandDetector(n_hands, video=False)
     import cv2
     out = []
     for p, y in paths:
         img = cv2.imread(str(p))
         if img is None:
             continue
-        found = hands_from_result(hands.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+        found = hands(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         f = hands_to_features(found, n_hands)
         if f is None:
             continue
@@ -53,6 +53,7 @@ def _extract_chunk(args):
 def cmd_extract(a):
     from joblib import Parallel, delayed
     n_hands = N_HANDS[a.lang]
+    model_path("hand_landmarker.task")          # download once here, not in every worker
     root = find_class_root(a.images)
     classes = sorted(d.name for d in root.iterdir() if d.is_dir() and d.name not in set(a.skip))
     print(f"class root: {root}\n{len(classes)} classes: {classes}")

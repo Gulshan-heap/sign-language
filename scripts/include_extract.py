@@ -22,7 +22,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np  # noqa: E402
-from slr.landmarks import video_to_keypoints  # noqa: E402
+from slr.landmarks import MODELS, model_path, video_to_keypoints  # noqa: E402
 
 ZENODO = "https://zenodo.org/api/records/4010759"
 SPLIT_URL = "https://raw.githubusercontent.com/AI4Bharat/INCLUDE/master/train_test_paths/include50_{}.txt"
@@ -120,6 +120,8 @@ def main():
             print(f"{k:40s} {s / 1e9:5.2f} GB")
         print(f"{len(parts)} parts, {sum(s for _, s in parts) / 1e9:.1f} GB total (we won't download all of it)")
         return
+    for m in MODELS:
+        model_path(m)                                # download the MediaPipe models once, before the workers start
     splits = load_splits()
     print(f"INCLUDE-50 split: {len(splits)} videos, {len({slug(k[0]) for k in splits})} classes")
     names = a.parts or [k for k, _ in parts]

@@ -1,7 +1,7 @@
 # ASL + ISL sign recognition (letters and words)
 
 Letters: MediaPipe hand landmarks -> small scikit-learn classifier (ASL one hand, ISL two hands).
-Words: MediaPipe Holistic keypoint sequence (67 points x 32 frames) -> small Transformer (~1 MB).
+Words: MediaPipe hand + pose keypoint sequence (Tasks API) (67 points x 32 frames) -> small Transformer (~1 MB).
 Training runs on Kaggle/Colab, the demo runs on your laptop.
 
 ```

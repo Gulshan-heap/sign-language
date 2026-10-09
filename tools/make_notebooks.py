@@ -41,9 +41,12 @@ else:
         raise SystemExit("Attach the slr-code dataset, then run this cell again.")
 os.chdir(CODE)
 print("code ready in", CODE, os.listdir(CODE))
-# mediapipe 0.10.14 still has the `mp.solutions` API we use. If pip complains about numpy, run
-# `!pip install "numpy<2"` and restart the session once.
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "mediapipe==0.10.14", "remotezip", "opencv-python-headless"])
+# Install each package on its own so one failure cannot skip the others. Kaggle now runs Python 3.13, so we use the
+# current mediapipe (Tasks API) - not the old pinned version.
+for pkg in ("mediapipe", "remotezip", "opencv-python-headless"):
+    r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", pkg], capture_output=True, text=True)
+    print(pkg, "OK" if r.returncode == 0 else "FAILED\\n" + r.stderr[-600:])
+import mediapipe; print("mediapipe", mediapipe.__version__)
 ''')
 
 

@@ -8,7 +8,6 @@ Keys:  1 ASL letters   2 ISL letters   3 ASL words   4 ISL words
        Q quit
 Expected files in --models (missing ones just disable that mode):
   asl_letters.joblib  isl_letters.joblib  asl_words.pt  isl_words.pt
-  optional pretrained ASL: asl_words.tflite + sign_to_prediction_index_map.json (needs tensorflow)
 """
 import argparse
 import collections
@@ -19,8 +18,8 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from slr.inference import Models, full543  # noqa: E402
-from slr.landmarks import frame_from_holistic, hands_from_result, make_hands, make_holistic  # noqa: E402
+from slr.inference import Models  # noqa: E402
+from slr.landmarks import FrameTracker, HandDetector  # noqa: E402
 
 MODES = {ord("1"): "asl_letters", ord("2"): "isl_letters", ord("3"): "asl_words", ord("4"): "isl_words"}
 GREEN, RED, WHITE = (80, 220, 100), (60, 60, 255), (255, 255, 255)
@@ -43,11 +42,11 @@ def main():
     print("available:", [m for m in MODES.values() if M.available(m)])
 
     cap = cv2.VideoCapture(a.camera)
-    hands = {1: make_hands(False, 1, 1), 2: make_hands(False, 2, 1)}
-    holistic = make_holistic(0)
+    hands = {1: HandDetector(1, video=True), 2: HandDetector(2, video=True)}
+    tracker = FrameTracker()
     recent = collections.deque(maxlen=8)
     text, last_letter = "", None
-    recording, rec67, rec543, result = False, [], [], None
+    recording, rec67, result = False, [], None
 
     while True:
         ok, frame = cap.read()
@@ -59,7 +58,7 @@ def main():
         put(view, f"[{mode}]  1 ASL-letters 2 ISL-letters 3 ASL-words 4 ISL-words  Q quit", 24, scale=0.5)
 
         if kind == "letters":
-            found = hands_from_result(hands[1 if lang == "asl" else 2].process(rgb))
+            found = hands[1 if lang == "asl" else 2](rgb)
             for h in found:
                 for x, y, _ in h:
                     cv2.circle(view, (int((1 - x) * view.shape[1]), int(y * view.shape[0])), 3, GREEN, -1)
@@ -71,13 +70,13 @@ def main():
             put(view, f"text: {text}", 100)
             put(view, "A add  BACKSPACE del  C clear", view.shape[0] - 12, scale=0.5)
         else:
-            res = holistic.process(rgb)
+            fr = tracker(rgb)
             if recording:
-                rec67.append(frame_from_holistic(res)); rec543.append(full543(res))
-            for lms in (res.left_hand_landmarks, res.right_hand_landmarks):
-                if lms:
-                    for p in lms.landmark:
-                        cv2.circle(view, (int((1 - p.x) * view.shape[1]), int(p.y * view.shape[0])), 3, GREEN, -1)
+                rec67.append(fr)
+            for pts in (fr[25:46], fr[46:67]):
+                if not np.isnan(pts).any():
+                    for x, y in pts:
+                        cv2.circle(view, (int((1 - x) * view.shape[1]), int(y * view.shape[0])), 3, GREEN, -1)
             put(view, f"RECORDING {len(rec67)} frames - SPACE to stop" if recording else "SPACE to record a sign",
                 60, RED if recording else WHITE, 0.8)
             for i, (lbl, p) in enumerate(result or []):
@@ -100,11 +99,11 @@ def main():
                 text = ""
         elif k == 32:
             if not recording:
-                recording, rec67, rec543, result = True, [], [], None
+                recording, rec67, result = True, [], None
             else:
                 recording = False
                 if len(rec67) >= 8:
-                    result = M.word(lang, np.stack(rec67), np.stack(rec543))
+                    result = M.word(lang, np.stack(rec67))
     cap.release()
     cv2.destroyAllWindows()
 

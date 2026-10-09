@@ -19,8 +19,8 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from slr.inference import Models, full543  # noqa: E402
-from slr.landmarks import frame_from_holistic, hands_from_result, make_hands, make_holistic  # noqa: E402
+from slr.inference import Models  # noqa: E402
+from slr.landmarks import FrameTracker, HandDetector  # noqa: E402
 
 
 def report(rows, out, name):
@@ -46,31 +46,29 @@ def report(rows, out, name):
 
 def eval_words(a):
     M = Models(a.models)
-    holistic = make_holistic(1)
     rows = []
     for d in sorted((Path(a.clips) / a.lang).iterdir()):
         for v in sorted(d.glob("*.mp4")):
-            cap, k67, k543 = cv2.VideoCapture(str(v)), [], []
+            tracker, cap, kp = FrameTracker(), cv2.VideoCapture(str(v)), []
             while True:
                 ok, f = cap.read()
                 if not ok:
                     break
-                res = holistic.process(cv2.cvtColor(f, cv2.COLOR_BGR2RGB))
-                k67.append(frame_from_holistic(res)); k543.append(full543(res))
-            if len(k67) < 8:
+                kp.append(tracker(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)))
+            tracker.close()
+            if len(kp) < 8:
                 print("too short:", v); continue
-            pred = [l for l, _ in M.word(a.lang, np.stack(k67), np.stack(k543))]
-            rows.append((d.name, pred))
+            rows.append((d.name, [l for l, _ in M.word(a.lang, np.stack(kp))]))
     report(rows, a.out, f"{a.lang}_words")
 
 
 def eval_letters(a):
     M = Models(a.models)
-    hands = make_hands(True, 1 if a.lang == "asl" else 2, 1)
+    hands = HandDetector(1 if a.lang == "asl" else 2, video=False)
     rows = []
     for d in sorted((Path(a.images) / a.lang).iterdir()):
         for img in sorted(p for p in d.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}):
-            found = hands_from_result(hands.process(cv2.cvtColor(cv2.imread(str(img)), cv2.COLOR_BGR2RGB)))
+            found = hands(cv2.cvtColor(cv2.imread(str(img)), cv2.COLOR_BGR2RGB))
             pred = M.letter(a.lang, found) if found else None
             rows.append((d.name.upper(), [pred[0] if pred else "(no hand)"]))
     report(rows, a.out, f"{a.lang}_letters")
