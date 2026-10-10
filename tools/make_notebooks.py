@@ -83,27 +83,45 @@ for lang, root in [("asl", ASL_IMAGES), ("isl", ISL_IMAGES)]:
                  "Save Version -> Save & Run All, then Output -> **New Dataset** to keep `models/`, `letters/`, `include50/`."),
 ])
 
+FIND = ("code", '''
+import glob, os
+def find_dir(marker, root="/kaggle/input", depth=5):
+    """Folder that directly contains `marker` (file or folder), searched shallowly - Kaggle mount paths differ between versions."""
+    for d in range(depth + 1):
+        for p in glob.glob(root + "/*" * d + "/" + marker):
+            return os.path.dirname(p)
+    return None
+''')
+
 DAY2_ASL = nb([
     ("markdown", "# Day 2 (teammate A) - ASL words. CPU is enough; no Day-1 data needed.\n"
-                 "Inputs: `slr-code`, `209sontung/sign-language`, competition `asl-signs`. Internet ON."),
+                 "Inputs: `slr-code` and the competition **Google - Isolated Sign Language Recognition** "
+                 "(https://www.kaggle.com/competitions/asl-signs: click *Join Competition* / accept the rules once, then "
+                 "*+ Add Input -> Competition Data*). Internet ON. Never download the data; it is only attached."),
     SETUP,
-    ("markdown", "## 1. Pretrained inference on the chosen signs (no training)\n"
-                 "Set `MODEL_DIR` to the pretrained-model folder shown in the sidebar (hover -> copy path)."),
+    FIND,
+    ("markdown", "## 1. Find the data and pick the signs"),
     ("code", '''
-MODEL_DIR = "/kaggle/input/sign-language"
+ASL_DATA = find_dir("train_landmark_files")
+assert ASL_DATA, "asl-signs competition data not attached: + Add Input -> Competition Data -> asl-signs (accept the rules first)"
+print("data:", ASL_DATA)
 SIGNS = "hello thankyou please yes no mom dad water eat drink go sleep happy sad like want home cat dog bird red blue green hungry sick".split()
-!python scripts/asl_words.py inspect --model-dir $MODEL_DIR
-!python scripts/asl_words.py infer --model-dir $MODEL_DIR --data /kaggle/input/asl-signs --signs {" ".join(SIGNS)} --per-sign 20 --out $WORK/models/asl_pretrained_eval.json
 '''),
-    ("markdown", "## 2. Train only on those signs (run this if step 1 failed, or if the team lead asks)\n"
-                 "Also fine to run even if step 1 worked: we then compare both."),
+    ("markdown", "## 2. Convert only these signs to keypoints and train (about 20-40 minutes on CPU)"),
     ("code", '''
-!python scripts/asl_words.py extract --data /kaggle/input/asl-signs --signs {" ".join(SIGNS)} --out $WORK/asl_words
-!python scripts/train_words.py --data $WORK/asl_words --out $WORK/models/asl_words.pt --epochs 120
+!python scripts/asl_words.py extract --data $ASL_DATA --signs {" ".join(SIGNS)} --per-sign 300 --out $WORK/asl_words
+!python scripts/train_words.py --data $WORK/asl_words --out $WORK/models/asl_words.pt --epochs 60
 '''),
-    ("markdown", "## 3. Package for download\nAlso copy the pretrained model files so the demo can use them."),
+    ("markdown", "## 3. (Optional) pretrained model benchmark - skip unless the team lead asks\n"
+                 "Needs a pretrained TFLite ASL model attached as an input; set `RUN_PRETRAINED = True` and `MODEL_DIR`."),
     ("code", '''
-!cp $MODEL_DIR/*.tflite $MODEL_DIR/*.json $WORK/models/ 2>/dev/null
+RUN_PRETRAINED = False
+MODEL_DIR = "/kaggle/input/sign-language"
+if RUN_PRETRAINED:
+    !python scripts/asl_words.py infer --model-dir $MODEL_DIR --data $ASL_DATA --signs {" ".join(SIGNS)} --per-sign 20 --out $WORK/models/asl_pretrained_eval.json
+'''),
+    ("markdown", "## 4. Package for download"),
+    ("code", '''
 !cd $WORK && zip -r asl_models.zip models && ls -lh asl_models.zip
 '''),
     ("markdown", "Then **Save Version -> Save & Run All**, open the Output tab and download `asl_models.zip`."),
@@ -111,16 +129,20 @@ SIGNS = "hello thankyou please yes no mom dad water eat drink go sleep happy sad
 
 DAY2_ISL = nb([
     ("markdown", "# Day 2 (teammate B) - ISL words (needs the Day-1 output dataset)\n"
-                 "Inputs: `slr-code` and the Day-1 output dataset (`include50/` inside). Internet ON. "
-                 "Set the accelerator to **GPU T4** before the training cell."),
+                 "Inputs: `slr-code` and the Day-1 output (a dataset or a notebook output that contains `include50/`). Internet ON. "
+                 "CPU is fine (5-15 minutes); GPU is optional."),
     SETUP,
-    ("markdown", "## 1. Point at the Day-1 keypoints\n"
-                 "Edit `INCLUDE_KP`: the sidebar path of the Day-1 dataset + `/include50`. It should contain `train`, `val`, `test` folders."),
+    FIND,
+    ("markdown", "## 1. Find the Day-1 keypoints"),
     ("code", '''
-INCLUDE_KP = "/kaggle/input/REPLACE-WITH-DAY1-OUTPUT-DATASET/include50"
-!ls $INCLUDE_KP && ls $INCLUDE_KP/train | wc -l
+INCLUDE_KP = find_dir("include50/train")
+assert INCLUDE_KP, "Day-1 output not attached: + Add Input -> your Day-1 dataset / notebook output (must contain include50/)"
+INCLUDE_KP = INCLUDE_KP + "/include50" if not INCLUDE_KP.endswith("include50") else INCLUDE_KP
+print("keypoints:", INCLUDE_KP)
+for s in ("train", "val", "test"):
+    print(s, len(glob.glob(f"{INCLUDE_KP}/{s}/*.npz")), "files")
 '''),
-    ("markdown", "## 2. Train (GPU T4, about 5-15 minutes)"),
+    ("markdown", "## 2. Train (about 5-15 minutes)"),
     ("code", '''
 !python scripts/train_words.py --data $INCLUDE_KP --out $WORK/models/isl_words.pt --epochs 150 --seeds 3
 '''),

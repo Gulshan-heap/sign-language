@@ -37,6 +37,8 @@ def main():
     li = {l: i for i, l in enumerate(labels)}
     tr, va, te = (load_split(a.data, s, li) for s in ("train", "val", "test"))
     print(f"{len(labels)} classes | train {len(tr[0])} val {len(va[0])} test {len(te[0])}")
+    if not tr[0]:
+        sys.exit(f"No training files found under {a.data}/train - check the path (expected <label>__<id>.npz files)")
 
     best_model, best_val = None, -1
     for seed in range(a.seeds):

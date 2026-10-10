@@ -52,7 +52,7 @@ def pick_rows(data, signs, per_sign, seed=0):
         print("WARNING: not in the 250-sign vocabulary, skipped:", missing)
     df = df[df["sign"].isin(signs)]
     if per_sign:
-        df = df.groupby("sign", group_keys=False).apply(lambda g: g.sample(min(len(g), per_sign), random_state=seed))
+        df = pd.concat([g.sample(min(len(g), per_sign), random_state=seed) for _, g in df.groupby("sign")])
     return df.reset_index(drop=True)
 
 
