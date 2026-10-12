@@ -1,3 +1,5 @@
 *.venv/
 *.npz
 !models/*_np.npz
+__pycache__/
+*.pyc
