@@ -9,6 +9,7 @@ Letters mode types fingerspelled letters live. Nothing leaves your machine. (Cam
 import argparse
 import os
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -21,9 +22,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from slr.inference import Models  # noqa: E402
 from slr.landmarks import FrameTracker, HandDetector, LH, RH, N_POSE, model_path  # noqa: E402
-from slr.live import LetterStabiliser, WordSegmenter  # noqa: E402
+from slr.live import MIN_HAND_FRAMES, LetterStabiliser, WordSegmenter, hands_visible  # noqa: E402
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024        # uploaded videos
 LOCK = threading.Lock()            # MediaPipe objects are not thread-safe; one camera at a time
 STATE = {"trackers": {}, "key": None, "seg": None, "stab": None}
 HTML = Path(__file__).with_name("live.html")
@@ -103,6 +105,87 @@ def frame():
                        hands=[pts(h) for h in hands], pose=None)
     out["ms"] = round((time.time() - t0) * 1000)
     return jsonify(out)
+
+
+def video_frames(path, fps_target=15, max_s=40, max_w=640):
+    """Yield (seconds, rgb) from a video file at ~fps_target (every n-th frame), downscaled for speed/memory."""
+    cap = cv2.VideoCapture(str(path))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not 1 < (fps or 0) < 241:                         # browser-recorded webm often reports 0 / 1000
+        fps = 30.0
+    stride, i = max(1, round(fps / fps_target)), 0
+    try:
+        while True:
+            ok, img = cap.read()
+            if not ok:
+                return
+            if i % stride == 0:
+                t = i / fps
+                if t > max_s:
+                    return
+                if img.shape[1] > max_w:
+                    img = cv2.resize(img, None, fx=max_w / img.shape[1], fy=max_w / img.shape[1], interpolation=cv2.INTER_AREA)
+                yield t, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            i += 1
+    finally:
+        cap.release()
+
+
+@app.post("/api/video")
+def video():
+    """Decode an uploaded recording. words: mode=word (whole clip = one sign) or mode=sentence (split into signs);
+    letters: types the fingerspelled letters."""
+    t0 = time.time()
+    M, f = STATE["models"], request.form
+    kind, lang, mode, thr = f.get("kind", "words"), f.get("lang", "isl"), f.get("mode", "word"), float(f.get("thr", 0.5))
+    if not (lang in M.words if kind == "words" else lang in M.letters):
+        return jsonify(error=f"No {lang.upper()} {kind} model loaded in {STATE['models_dir']}"), 400
+    up = request.files.get("video")
+    if up is None:
+        return jsonify(error="no file"), 400
+    budget, truncated, n, with_hands = 100, False, 0, 0
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / ("clip" + (Path(up.filename or "").suffix or ".mp4"))
+        up.save(src)
+        events, kps = [], []
+        with LOCK:
+            trk = tracker_for(kind, lang)
+            seg = WordSegmenter(lambda seq: M.word(lang, seq), threshold=thr) if kind == "words" and mode == "sentence" else None
+            stab = LetterStabiliser(hold=6, repeat=15) if kind == "letters" else None
+            for t, rgb in video_frames(src):
+                if time.time() - t0 > budget:
+                    truncated = True
+                    break
+                n += 1
+                if kind == "words":
+                    fr = trk(rgb)
+                    with_hands += hands_visible(fr)
+                    if seg:
+                        ev = seg.push(fr, now=t)
+                        if ev:
+                            events.append(ev)
+                    else:
+                        kps.append(fr)
+                else:
+                    hands = trk(rgb)
+                    with_hands += bool(hands)
+                    pred = M.letter(lang, hands) if hands else None
+                    typed = stab.push(pred)[1]
+                    if typed:
+                        events.append({"label": typed, "prob": pred[1]})
+            if seg:
+                ev = seg.stop()
+                if ev:
+                    events.append(ev)
+            elif kind == "words" and with_hands >= MIN_HAND_FRAMES:
+                top = [{"label": l, "prob": float(p)} for l, p in M.word(lang, np.stack(kps))]
+                events.append({"accepted": top[0]["prob"] >= thr, "top": top, "frames": len(kps)})
+    if n == 0:
+        return jsonify(error="Could not read any frames from that file. Try an .mp4 or .webm."), 400
+    if with_hands < MIN_HAND_FRAMES:
+        return jsonify(error="No hands were found in the video. Make sure your hands are visible and well lit."), 400
+    return jsonify(kind=kind, mode=mode, events=events, frames=n, hands_pct=round(with_hands / n, 2),
+                   seconds=round(time.time() - t0, 1), truncated=truncated)
 
 
 def init(models_dir):

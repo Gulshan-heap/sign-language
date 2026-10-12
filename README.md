@@ -62,6 +62,9 @@ python web/live.py --models models       # open http://localhost:5001 and press 
 - **Words** (ISL / ASL): in *Auto* mode a sign starts when your hands appear and is decoded when they leave the picture
   (~0.7 s). *Hold to sign* (button or Space) lets you mark the start/end yourself. Words above the confidence slider are
   added to the sentence; unsure ones show their top-3 so you can tap the right one. Speak / copy / undo are built in.
+- **Upload a video** (button, or drag a file onto the camera window): works without a camera. Choose "one sign" or
+  "several signs (split into words)"; in letters mode the fingerspelled letters are typed. Videos are sampled at ~15 fps,
+  the first 40 s are used (max 100 MB), and the file is deleted after processing.
 - **Letters** (ASL): fingerspell; hold each letter ~1 s to type it. The `space` and `del` signs act as keys.
 - Uses `slr/live.py` for the segmentation; needs `models/{asl,isl}_words.pt` and `asl_letters_np.npz` (unzip the Kaggle
   output, e.g. `models/asl_models.zip`, into the project root). A mode whose model is missing says so instead of decoding.

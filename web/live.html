@@ -24,6 +24,7 @@ button.hold.live{background:var(--bad);border-color:var(--bad);color:#fff}
 .pill.ok{color:var(--ok);border-color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}
 .stage{position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:4/3}
 .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+.stage #clipv{display:none;transform:none;object-fit:contain;background:#000;z-index:2}
 .badge{position:absolute;left:10px;top:10px;padding:5px 12px;border-radius:99px;background:#000a;color:#fff;font-size:13px;display:flex;gap:8px;align-items:center}
 .dot{width:10px;height:10px;border-radius:50%;background:#888}
 .badge.signing .dot{background:#ff4d4d;animation:pulse 1s infinite}.badge.waiting .dot{background:#f0b34a}.badge.ready .dot{background:#38c585}
@@ -58,7 +59,16 @@ kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;paddi
   <div class="stage">
    <video id="cam" autoplay muted playsinline></video><canvas id="ov"></canvas>
    <div id="badge" class="badge"><span class="dot"></span><span id="badgeTxt">Camera off</span></div>
-   <div id="empty" class="empty"><div>Turn on the camera to start decoding.<br><span style="opacity:.75;font-size:13px">Video stays on this computer.</span></div><button class="primary" id="camBtn">Start camera</button></div>
+   <div id="empty" class="empty"><div>Turn on the camera to start decoding,<br>or drop a recorded video here.<br><span style="opacity:.75;font-size:13px">Camera video is analysed live and not stored.</span></div>
+    <div class="row" style="justify-content:center"><button class="primary" id="camBtn">Start camera</button><button id="upBtn2">Upload a video</button></div></div>
+   <video id="clipv" controls playsinline></video>
+   <div id="drop" class="empty" style="display:none;background:#2f6fedcc;z-index:3">Drop the video to decode it</div>
+  </div>
+  <div class="row" id="upRow">
+   <button id="upBtn">&#11014; Upload a video</button><input type="file" id="file" accept="video/*" hidden>
+   <select id="upMode" title="Does the video contain one sign or a whole sentence?"><option value="word">One sign in the video</option><option value="sentence">Several signs (split into words)</option></select>
+   <button id="closeClip" style="display:none">&#10005; Back to camera</button>
+   <span id="upMsg" class="mut"></span>
   </div>
   <div class="row" id="wordCtl">
    <div class="seg" id="modeSeg"><button data-m="auto" class="on" title="A sign starts when your hands appear and ends when they leave the picture">Auto</button><button data-m="manual" title="Hold the button (or Space) while you sign">Hold to sign</button></div>
@@ -116,6 +126,7 @@ function seg(id,attr,val){document.querySelectorAll("#"+id+" button").forEach(b=
 function render(){
   seg("kindSeg","k",kind);seg("langSeg","l",lang);seg("modeSeg","m",manual?"manual":"auto");
   const has=pick(kind,lang).length>0;
+  $("upMode").style.display=kind=="words"?"":"none";
   $("wordCtl").style.display=kind=="words"?"":"none";$("hold").style.display=kind=="words"&&manual?"":"none";
   $("wordRes").style.display=kind=="words"?"":"none";$("letterRes").style.display=kind=="letters"?"":"none";
   $("spaceBtn").style.display=kind=="letters"?"":"none";
@@ -144,6 +155,7 @@ const grab=document.createElement("canvas");
 async function loop(){
   while(running){
     const t=performance.now(),v=$("cam");
+    if(clipOpen){await sleep(200);continue}                       // a recorded video is on screen: pause the live feed
     if(!pick(kind,lang).length){setBadge("No model for this selection","");await sleep(500);continue}
     const w=480,h=Math.round(w*(v.videoHeight||480)/(v.videoWidth||640));grab.width=w;grab.height=h;
     grab.getContext("2d").drawImage(v,0,0,w,h);
@@ -162,6 +174,40 @@ async function loop(){
 }
 let sentStart=false;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* ---------- uploaded video ---------- */
+let clipOpen=false,clipUrl=null;
+const upload=f=>{if(f)uploadVideo(f)};
+$("upBtn").onclick=$("upBtn2").onclick=()=>$("file").click();
+$("file").onchange=e=>{upload(e.target.files[0]);e.target.value=""};
+const stage=document.querySelector(".stage");
+["dragenter","dragover"].forEach(t=>stage.addEventListener(t,e=>{e.preventDefault();$("drop").style.display="flex"}));
+["dragleave","drop"].forEach(t=>stage.addEventListener(t,e=>{e.preventDefault();$("drop").style.display="none"}));
+stage.addEventListener("drop",e=>upload(e.dataTransfer.files[0]));
+function openClip(f){
+  if(clipUrl)URL.revokeObjectURL(clipUrl);clipUrl=URL.createObjectURL(f);
+  $("clipv").src=clipUrl;$("clipv").style.display="block";$("closeClip").style.display="";clipOpen=true;
+  $("ov").getContext("2d").clearRect(0,0,$("ov").width,$("ov").height);
+}
+$("closeClip").onclick=()=>{$("clipv").pause();$("clipv").style.display="none";$("closeClip").style.display="none";$("upMsg").textContent="";clipOpen=false;pending="reset";setBadge(running?"Ready — show your hands":"Camera off","ready")};
+async function uploadVideo(f){
+  if(!pick(kind,lang).length){$("upMsg").innerHTML='<span class="bad">No '+lang.toUpperCase()+' '+kind+' model available.</span>';return}
+  openClip(f);$("upBtn").disabled=$("upBtn2").disabled=true;
+  $("upMsg").textContent="Analysing “"+f.name+"” … this can take a little while.";setBadge("Analysing video…","signing");
+  const fd=new FormData();fd.append("video",f,f.name);fd.append("kind",kind);fd.append("lang",lang);fd.append("thr",$("thr").value/100);fd.append("mode",$("upMode").value);
+  try{
+    const r=await fetch("/api/video",{method:"POST",body:fd}),j=await r.json();
+    if(!r.ok){$("upMsg").innerHTML='<span class="bad">'+(j.error||"Upload failed (file too large?)")+'</span>';setBadge("Video not decoded","")}
+    else{
+      setBadge("Video decoded","ready");
+      if(kind=="letters"){j.events.forEach(e=>typeLetter(e.label,e.prob));if(!j.events.length)clearResult()}
+      else{j.events.forEach(onWord);if(!j.events.length){clearResult();$("wordSub").textContent="No complete sign found in the video."}}
+      const n=kind=="letters"?j.events.length+" letter(s)":j.events.filter(e=>e.accepted).length+" word(s) added";
+      $("upMsg").innerHTML=`${n} · ${j.frames} frames, hands seen in ${Math.round(j.hands_pct*100)}% · ${j.seconds}s`+(j.truncated?' <span class="bad">(video was long; only the first part was analysed)</span>':"");
+    }
+  }catch(e){$("upMsg").innerHTML='<span class="bad">Could not reach the server.</span>';setBadge("Video not decoded","")}
+  $("upBtn").disabled=$("upBtn2").disabled=false;
+}
 
 /* ---------- handling a server reply ---------- */
 function handle(j){
