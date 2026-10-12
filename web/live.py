@@ -31,6 +31,22 @@ STATE = {"trackers": {}, "key": None, "seg": None, "stab": None}
 HTML = Path(__file__).with_name("live.html")
 
 
+CLIPS = {}                         # id -> keypoint sequence of recent decoded signs, so one can be saved as training data
+_clip_n = [0]
+
+
+def stash(ev):
+    """Move the raw keypoint sequence out of a decode event (not JSON) into CLIPS and give the event an id."""
+    seq = ev.pop("seq", None)
+    if seq is not None:
+        _clip_n[0] += 1
+        ev["id"] = _clip_n[0]
+        CLIPS[_clip_n[0]] = seq
+        for old in [k for k in CLIPS if k <= _clip_n[0] - 20]:
+            del CLIPS[old]
+    return ev
+
+
 def pts(a):
     """(n, 2+) array -> JSON-safe [[x, y] | None, ...] (NaN -> None)."""
     return [None if not np.isfinite(p[:2]).all() else [round(float(p[0]), 3), round(float(p[1]), 3)] for p in a]
@@ -92,7 +108,7 @@ def frame():
             fr = trk(rgb)
             ev = seg.stop() if cmd == "stop" else seg.push(fr)
             if ev:
-                out["event"] = ev
+                out["event"] = stash(ev)
             out.update(state=seg.state, frames=len(seg.buf), seconds=round(time.time() - seg.t0, 1) if seg.buf else 0,
                        hands=[h for h in (pts(fr[LH]), pts(fr[RH])) if h[0]], pose=pts(fr[:N_POSE]))
         else:
@@ -163,7 +179,7 @@ def video():
                     if seg:
                         ev = seg.push(fr, now=t)
                         if ev:
-                            events.append(ev)
+                            events.append(stash(ev))
                     else:
                         kps.append(fr)
                 else:
@@ -176,16 +192,34 @@ def video():
             if seg:
                 ev = seg.stop()
                 if ev:
-                    events.append(ev)
+                    events.append(stash(ev))
             elif kind == "words" and with_hands >= MIN_HAND_FRAMES:
                 top = [{"label": l, "prob": float(p)} for l, p in M.word(lang, np.stack(kps))]
-                events.append({"accepted": top[0]["prob"] >= thr, "top": top, "frames": len(kps)})
+                events.append(stash({"accepted": top[0]["prob"] >= thr, "top": top, "frames": len(kps), "seq": np.stack(kps)}))
     if n == 0:
         return jsonify(error="Could not read any frames from that file. Try an .mp4 or .webm."), 400
     if with_hands < MIN_HAND_FRAMES:
         return jsonify(error="No hands were found in the video. Make sure your hands are visible and well lit."), 400
     return jsonify(kind=kind, mode=mode, events=events, frames=n, hands_pct=round(with_hands / n, 2),
                    seconds=round(time.time() - t0, 1), truncated=truncated)
+
+
+@app.post("/api/save_clip")
+def save_clip():
+    """Save a decoded sign under the word the user says it really was: own_clips/<lang>/train/<word>__own_<ms>.npz.
+    Same layout/format as the training keypoints, so the folder can be copied into the training data (scripts/train_words.py)."""
+    M, f = STATE["models"], request.form
+    lang, word = f.get("lang", ""), f.get("word", "")
+    seq = CLIPS.get(int(f["id"])) if f.get("id", "").isdigit() else None
+    if seq is None:
+        return jsonify(error="That clip is no longer available - sign it again."), 404
+    if lang not in M.words or word not in M.words[lang][1]:
+        return jsonify(error="unknown word"), 400
+    d = ROOT / "own_clips" / lang / "train"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{word}__own_{int(time.time() * 1000)}.npz"
+    np.savez_compressed(path, kp=seq.astype(np.float16))
+    return jsonify(saved=str(path.relative_to(ROOT)), count=len(list(d.glob(f"{word}__own_*.npz"))), total=len(list(d.glob("*__own_*.npz"))))
 
 
 def init(models_dir):

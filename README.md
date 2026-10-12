@@ -65,6 +65,11 @@ python web/live.py --models models       # open http://localhost:5001 and press 
 - **Upload a video** (button, or drag a file onto the camera window): works without a camera. Choose "one sign" or
   "several signs (split into words)"; in letters mode the fingerspelled letters are typed. Videos are sampled at ~15 fps,
   the first 40 s are used (max 100 MB), and the file is deleted after processing.
+- **Improving a word model with your own signing:** after each decode, pick the word you really signed and press
+  *Save for training*. Clips go to `own_clips/<lang>/train/<word>__own_<time>.npz` (same format as the INCLUDE keypoints).
+  Copy that `train/` folder into the training data (`include50/train/` on Kaggle), re-run `train_words.py`, then
+  `tools/export_words_np.py`. Aim for 5-10 clips per word you care about, signed the way you will use it. Needs the local
+  server (a hosted instance loses saved files on restart).
 - **Letters** (ASL): fingerspell; hold each letter ~1 s to type it. The `space` and `del` signs act as keys.
 - Uses `slr/live.py` for the segmentation; needs `models/{asl,isl}_words.pt` and `asl_letters_np.npz` (unzip the Kaggle
   output, e.g. `models/asl_models.zip`, into the project root). A mode whose model is missing says so instead of decoding.

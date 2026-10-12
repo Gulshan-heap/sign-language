@@ -72,8 +72,9 @@ class WordSegmenter:
         n_hand = sum(hands_visible(f) for f in buf)
         if n_hand < MIN_HAND_FRAMES:
             return {"accepted": False, "top": [], "frames": len(buf), "reason": "too short"}
-        top = [{"label": l, "prob": float(p)} for l, p in self.predict(np.stack(buf))]
-        return {"accepted": top[0]["prob"] >= self.threshold, "top": top, "frames": len(buf)}
+        seq = np.stack(buf)
+        top = [{"label": l, "prob": float(p)} for l, p in self.predict(seq)]
+        return {"accepted": top[0]["prob"] >= self.threshold, "top": top, "frames": len(buf), "seq": seq}
 
 
 class LetterStabiliser:

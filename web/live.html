@@ -75,6 +75,7 @@ kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;paddi
    <button id="hold" class="hold" style="display:none">Hold to sign <kbd>Space</kbd></button>
    <label class="mut">Min. confidence <input id="thr" type="range" min="20" max="95" value="50" style="width:110px"> <b id="thrV">50%</b></label>
   </div>
+  <p id="frameWarn" class="bad" style="margin:10px 0 0;font-size:13px;display:none">Your shoulders are not in view. The word model measures hand positions relative to your shoulders, so sit back until your head, both shoulders and both hands are visible.</p>
   <p id="tip" class="mut" style="margin:10px 0 0;font-size:13px"></p>
  </section>
 
@@ -82,6 +83,8 @@ kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;paddi
   <h2><span id="resTitle">Decoded</span></h2>
   <div id="wordRes">
    <div id="word" class="word mut">—</div><div id="wordSub" class="mut" style="margin-bottom:8px">Waiting for a sign.</div><div id="top"></div>
+   <div id="teach" class="row" style="display:none"><span class="mut">Wrong? Save this clip as</span><select id="teachWord"></select>
+    <button id="teachSave">Save for training</button><span id="teachMsg" class="mut"></span></div>
   </div>
   <div id="letterRes" style="display:none">
    <div id="letter" class="big-letter mut">—</div>
@@ -134,6 +137,7 @@ function render(){
   $("vocab").innerHTML=has?pick(kind,lang).map(w=>`<span>${w}</span>`).join(""):'<span class="bad">No '+lang.toUpperCase()+' '+kind+' model found in models/</span>';
   $("tip").textContent=!has?"":kind=="letters"?"Fingerspell with one hand"+(lang=="isl"?" or two":"")+" in front of the camera. Hold each letter steady for about a second to type it.":
     manual?"Hold the button (or Space) while you sign, release when done.":"Sign one word, then lower your hands out of view. The word is decoded when your hands leave.";
+  $("teachWord").innerHTML=pick("words",lang).map(w=>`<option>${w}</option>`).join("");$("teach").style.display="none";$("frameWarn").style.display="none";
   $("speak").disabled=!("speechSynthesis" in window);paint();
 }
 document.querySelectorAll("#kindSeg button").forEach(b=>b.onclick=()=>switchTo(b.dataset.k,lang));
@@ -157,9 +161,9 @@ async function loop(){
     const t=performance.now(),v=$("cam");
     if(clipOpen){await sleep(200);continue}                       // a recorded video is on screen: pause the live feed
     if(!pick(kind,lang).length){setBadge("No model for this selection","");await sleep(500);continue}
-    const w=480,h=Math.round(w*(v.videoHeight||480)/(v.videoWidth||640));grab.width=w;grab.height=h;
+    const w=640,h=Math.round(w*(v.videoHeight||480)/(v.videoWidth||640));grab.width=w;grab.height=h;
     grab.getContext("2d").drawImage(v,0,0,w,h);
-    const blob=await new Promise(r=>grab.toBlob(r,"image/jpeg",.75));
+    const blob=await new Promise(r=>grab.toBlob(r,"image/jpeg",.85));
     const fd=new FormData();fd.append("image",blob,"f.jpg");fd.append("kind",kind);fd.append("lang",lang);fd.append("thr",$("thr").value/100);
     let cmd=pending;pending="";
     if(manual&&kind=="words"){ if(holding&&!sentStart){cmd="start";sentStart=true} else if(!holding&&sentStart){cmd="stop";sentStart=false} }
@@ -172,7 +176,7 @@ async function loop(){
     await sleep(Math.max(0,70-(performance.now()-t)));
   }
 }
-let sentStart=false;
+let sentStart=false,noShoulders=0,lastId=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 /* ---------- uploaded video ---------- */
@@ -214,6 +218,8 @@ function handle(j){
   drawOverlay(j);
   const n=j.hands.length;
   if(kind=="words"){
+    const sh=j.pose&&j.pose[11]&&j.pose[12];noShoulders=sh?0:(n?noShoulders+1:noShoulders);
+    $("frameWarn").style.display=noShoulders>15?"":"none";if(sh)noShoulders=0;
     if(j.state=="signing")setBadge(`Signing… ${j.seconds}s`,"signing");
     else setBadge(n?"Hands seen — keep signing":"Ready — show your hands",n?"waiting":"ready");
     if(j.event)onWord(j.event);
@@ -241,7 +247,14 @@ function onWord(ev){
   $("top").querySelectorAll("button").forEach(b=>b.onclick=()=>{addWord(b.dataset.w);$("wordSub").textContent="Added “"+b.dataset.w+"” manually."});
   if(ev.accepted){addWord(t.label,true);}
   addHist(t.label,t.prob,ev.accepted);
+  if(ev.id){lastId=ev.id;$("teachWord").value=t.label;$("teachMsg").textContent="";$("teach").style.display=""}
 }
+$("teachSave").onclick=async()=>{
+  const fd=new FormData();fd.append("id",lastId);fd.append("lang",lang);fd.append("word",$("teachWord").value);
+  try{const r=await fetch("/api/save_clip",{method:"POST",body:fd}),j=await r.json();
+    $("teachMsg").innerHTML=r.ok?`<span class="ok">Saved: ${j.count} for “${$("teachWord").value}”, ${j.total} in total</span>`:`<span class="bad">${j.error}</span>`}
+  catch(e){$("teachMsg").innerHTML='<span class="bad">Could not save.</span>'}
+};
 function clearResult(){$("word").textContent="—";$("word").className="word mut";$("wordSub").textContent="Waiting for a sign.";$("top").innerHTML="";$("letter").textContent="—";$("prog").style.width="0"}
 
 /* ---------- sentence ---------- */
