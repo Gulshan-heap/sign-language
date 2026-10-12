@@ -55,6 +55,18 @@ python tools/evaluate_clips.py letters --lang asl --images images
   MediaPipe API and a full local copy of the dataset. The keypoints here are a different format, so `runner.py` cannot read them.
 - INCLUDE-50 gets ~94% in the paper with their pipeline; expect lower with this small model - report what you measure.
 
+## Live dashboard (browser) - sign in front of the camera, get the word
+```
+python web/live.py --models models       # open http://localhost:5001 and press "Start camera"
+```
+- **Words** (ISL / ASL): in *Auto* mode a sign starts when your hands appear and is decoded when they leave the picture
+  (~0.7 s). *Hold to sign* (button or Space) lets you mark the start/end yourself. Words above the confidence slider are
+  added to the sentence; unsure ones show their top-3 so you can tap the right one. Speak / copy / undo are built in.
+- **Letters** (ASL): fingerspell; hold each letter ~1 s to type it. The `space` and `del` signs act as keys.
+- Uses `slr/live.py` for the segmentation; needs `models/{asl,isl}_words.pt` and `asl_letters_np.npz` (unzip the Kaggle
+  output, e.g. `models/asl_models.zip`, into the project root). A mode whose model is missing says so instead of decoding.
+- The page shows what each model can recognise - signs outside that list will be mapped to the nearest known word.
+
 ## Web evaluator (browser)
 ```
 pip install -r requirements-local.txt

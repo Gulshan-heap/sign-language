@@ -1,0 +1,39 @@
+{
+  "labels": [
+    "bird",
+    "blue",
+    "cat",
+    "dad",
+    "dog",
+    "drink",
+    "go",
+    "green",
+    "happy",
+    "hello",
+    "home",
+    "hungry",
+    "like",
+    "mom",
+    "no",
+    "please",
+    "red",
+    "sad",
+    "sick",
+    "sleep",
+    "thankyou",
+    "water",
+    "yes"
+  ],
+  "metrics": {
+    "val": {
+      "top1": 0.9222222222222223,
+      "top3": 0.9747474747474747,
+      "n": 990
+    },
+    "test": {
+      "top1": 0.863275039745628,
+      "top3": 0.9538950715421304,
+      "n": 629
+    }
+  }
+}

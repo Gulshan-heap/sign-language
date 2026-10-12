@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Sign Decoder</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2230;--mut:#667085;--line:#e3e6ec;--acc:#2f6fed;--ok:#1a9d5b;--bad:#d64545;--warn:#c27a00;--chip:#eef2fb}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b2029;--ink:#e8ebf2;--mut:#98a2b3;--line:#2b3240;--acc:#6c9bff;--ok:#38c585;--bad:#ff7a7a;--warn:#f0b34a;--chip:#232a38}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,Segoe UI,sans-serif}
+header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0;flex:1;min-width:180px}
+main{max-width:1180px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+@media (max-width:860px){main{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 12px;display:flex;justify-content:space-between;align-items:center}
+.full{grid-column:1/-1}
+button,select,input[type=number]{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 12px}
+button{cursor:pointer}button:hover:not(:disabled){border-color:var(--acc)}button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+button.hold.live{background:var(--bad);border-color:var(--bad);color:#fff}
+.seg{display:inline-flex}.seg button{border-radius:0;margin-left:-1px}.seg button:first-child{border-radius:8px 0 0 8px;margin:0}.seg button:last-child{border-radius:0 8px 8px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0 0}
+.mut{color:var(--mut)}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.pill{font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.pill.ok{color:var(--ok);border-color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}
+.stage{position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:4/3}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+.badge{position:absolute;left:10px;top:10px;padding:5px 12px;border-radius:99px;background:#000a;color:#fff;font-size:13px;display:flex;gap:8px;align-items:center}
+.dot{width:10px;height:10px;border-radius:50%;background:#888}
+.badge.signing .dot{background:#ff4d4d;animation:pulse 1s infinite}.badge.waiting .dot{background:#f0b34a}.badge.ready .dot{background:#38c585}
+@keyframes pulse{50%{opacity:.25}}
+.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#fff;text-align:center;padding:20px}
+.word{font-size:46px;font-weight:700;line-height:1.1;min-height:52px;word-break:break-word}
+.word.flash{animation:flash .6s}@keyframes flash{from{color:var(--ok);transform:scale(1.06)}to{transform:none}}
+.bar{height:26px;border-radius:6px;background:var(--line);position:relative;margin:6px 0;overflow:hidden;cursor:pointer;border:0;width:100%;display:block;padding:0;text-align:left}
+.bar>i{position:absolute;inset:0 auto 0 0;background:var(--acc);opacity:.8}
+.bar>span{position:relative;padding:0 10px;line-height:26px;font-size:13px;color:var(--ink)}
+.bar:hover{outline:1px solid var(--acc)}
+.sentence{min-height:76px;border:1px dashed var(--line);border-radius:10px;padding:12px;font-size:24px;line-height:1.3;word-break:break-word}
+.sentence .cursor{display:inline-block;width:2px;height:1em;background:var(--acc);vertical-align:-.12em;animation:pulse 1s infinite}
+.vocab{display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow:auto}
+.vocab span{background:var(--chip);border-radius:6px;padding:2px 9px;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line)}
+.hist{max-height:230px;overflow:auto}
+.big-letter{font-size:96px;font-weight:700;line-height:1;min-height:100px}
+.prog{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:8px 0}.prog>i{display:block;height:100%;width:0;background:var(--ok);transition:width .1s}
+label{display:inline-flex;gap:6px;align-items:center}
+kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 6px;font-size:12px}
+</style></head><body>
+<header>
+ <h1>Live Sign Decoder</h1>
+ <span id="status" class="pill">starting…</span>
+ <div class="seg" id="kindSeg"><button data-k="words" class="on">Words</button><button data-k="letters">Letters</button></div>
+ <div class="seg" id="langSeg"><button data-l="isl" class="on">ISL</button><button data-l="asl">ASL</button></div>
+</header>
+<main>
+ <section class="card">
+  <h2>Camera <span id="perf" class="mut" style="text-transform:none;letter-spacing:0"></span></h2>
+  <div class="stage">
+   <video id="cam" autoplay muted playsinline></video><canvas id="ov"></canvas>
+   <div id="badge" class="badge"><span class="dot"></span><span id="badgeTxt">Camera off</span></div>
+   <div id="empty" class="empty"><div>Turn on the camera to start decoding.<br><span style="opacity:.75;font-size:13px">Video stays on this computer.</span></div><button class="primary" id="camBtn">Start camera</button></div>
+  </div>
+  <div class="row" id="wordCtl">
+   <div class="seg" id="modeSeg"><button data-m="auto" class="on" title="A sign starts when your hands appear and ends when they leave the picture">Auto</button><button data-m="manual" title="Hold the button (or Space) while you sign">Hold to sign</button></div>
+   <button id="hold" class="hold" style="display:none">Hold to sign <kbd>Space</kbd></button>
+   <label class="mut">Min. confidence <input id="thr" type="range" min="20" max="95" value="50" style="width:110px"> <b id="thrV">50%</b></label>
+  </div>
+  <p id="tip" class="mut" style="margin:10px 0 0;font-size:13px"></p>
+ </section>
+
+ <section class="card">
+  <h2><span id="resTitle">Decoded</span></h2>
+  <div id="wordRes">
+   <div id="word" class="word mut">—</div><div id="wordSub" class="mut" style="margin-bottom:8px">Waiting for a sign.</div><div id="top"></div>
+  </div>
+  <div id="letterRes" style="display:none">
+   <div id="letter" class="big-letter mut">—</div>
+   <div class="prog"><i id="prog"></i></div><div id="letterSub" class="mut">Hold a letter steady to type it.</div>
+  </div>
+  <h2 style="margin-top:20px">Sentence</h2>
+  <div id="sentence" class="sentence"></div>
+  <div class="row">
+   <button id="spaceBtn" style="display:none">Space</button>
+   <button id="undo">Undo</button><button id="clear">Clear</button><button id="copy">Copy</button>
+   <button id="speak">&#128266; Speak</button><label class="mut"><input type="checkbox" id="auto"> speak each new word</label>
+  </div>
+ </section>
+
+ <section class="card">
+  <h2>History</h2>
+  <div class="hist"><table><thead><tr><th>Time</th><th>Decoded</th><th>Confidence</th><th></th></tr></thead><tbody id="hist"></tbody></table></div>
+  <p id="histEmpty" class="mut">Nothing decoded yet.</p>
+ </section>
+ <section class="card">
+  <h2><span id="vocabTitle">Signs this model knows</span></h2>
+  <div id="vocab" class="vocab"></div>
+ </section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const HAND=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const ARMS=[[11,12],[11,13],[13,15],[12,14],[14,16]];
+let kind="words",lang="isl",manual=false,info={words:{},letters:{}},stream=null,running=false,pending="",holding=false;
+let text="",lastWord="",frames=0,fpsT=performance.now();
+const pick=(k,l)=>(info[k]||{})[l]||[];
+
+/* ---------- setup ---------- */
+async function boot(){
+  try{info=await (await fetch("/api/info")).json();setStatus("models ready","ok")}catch(e){setStatus("server not reachable","bad")}
+  // start on whichever model is available
+  if(!pick("words","isl").length){ if(pick("words","asl").length)lang="asl"; else if(pick("letters","asl").length){kind="letters";lang="asl"} }
+  render();
+}
+function setStatus(t,c){const s=$("status");s.textContent=t;s.className="pill "+(c||"")}
+function seg(id,attr,val){document.querySelectorAll("#"+id+" button").forEach(b=>b.classList.toggle("on",b.dataset[attr]==val))}
+function render(){
+  seg("kindSeg","k",kind);seg("langSeg","l",lang);seg("modeSeg","m",manual?"manual":"auto");
+  const has=pick(kind,lang).length>0;
+  $("wordCtl").style.display=kind=="words"?"":"none";$("hold").style.display=kind=="words"&&manual?"":"none";
+  $("wordRes").style.display=kind=="words"?"":"none";$("letterRes").style.display=kind=="letters"?"":"none";
+  $("spaceBtn").style.display=kind=="letters"?"":"none";
+  $("vocabTitle").textContent=kind=="words"?"Signs this model knows ("+pick("words",lang).length+")":"Letters this model knows";
+  $("vocab").innerHTML=has?pick(kind,lang).map(w=>`<span>${w}</span>`).join(""):'<span class="bad">No '+lang.toUpperCase()+' '+kind+' model found in models/</span>';
+  $("tip").textContent=!has?"":kind=="letters"?"Fingerspell with one hand"+(lang=="isl"?" or two":"")+" in front of the camera. Hold each letter steady for about a second to type it.":
+    manual?"Hold the button (or Space) while you sign, release when done.":"Sign one word, then lower your hands out of view. The word is decoded when your hands leave.";
+  $("speak").disabled=!("speechSynthesis" in window);paint();
+}
+document.querySelectorAll("#kindSeg button").forEach(b=>b.onclick=()=>switchTo(b.dataset.k,lang));
+document.querySelectorAll("#langSeg button").forEach(b=>b.onclick=()=>switchTo(kind,b.dataset.l));
+document.querySelectorAll("#modeSeg button").forEach(b=>b.onclick=()=>{manual=b.dataset.m=="manual";pending="reset";render()});
+function switchTo(k,l){kind=k;lang=l;pending="reset";clearResult();render()}
+$("thr").oninput=()=>$("thrV").textContent=$("thr").value+"%";
+
+/* ---------- camera + frame loop ---------- */
+async function startCam(){
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});}
+  catch(e){setStatus("camera blocked: "+e.message,"bad");return}
+  $("cam").srcObject=stream;await $("cam").play();$("empty").style.display="none";
+  const v=$("cam");document.querySelector(".stage").style.aspectRatio=(v.videoWidth||640)+"/"+(v.videoHeight||480);
+  running=true;pending="reset";loop();
+}
+$("camBtn").onclick=startCam;
+const grab=document.createElement("canvas");
+async function loop(){
+  while(running){
+    const t=performance.now(),v=$("cam");
+    if(!pick(kind,lang).length){setBadge("No model for this selection","");await sleep(500);continue}
+    const w=480,h=Math.round(w*(v.videoHeight||480)/(v.videoWidth||640));grab.width=w;grab.height=h;
+    grab.getContext("2d").drawImage(v,0,0,w,h);
+    const blob=await new Promise(r=>grab.toBlob(r,"image/jpeg",.75));
+    const fd=new FormData();fd.append("image",blob,"f.jpg");fd.append("kind",kind);fd.append("lang",lang);fd.append("thr",$("thr").value/100);
+    let cmd=pending;pending="";
+    if(manual&&kind=="words"){ if(holding&&!sentStart){cmd="start";sentStart=true} else if(!holding&&sentStart){cmd="stop";sentStart=false} }
+    if(cmd)fd.append("cmd",cmd);
+    let j;
+    try{const r=await fetch("/api/frame",{method:"POST",body:fd});j=await r.json();if(!r.ok){setBadge(j.error||"error","");await sleep(500);continue}}
+    catch(e){setBadge("server not reachable","");await sleep(800);continue}
+    handle(j);
+    frames++;const now=performance.now();if(now-fpsT>1000){$("perf").textContent=Math.round(frames*1000/(now-fpsT))+" fps · "+j.ms+" ms/frame";frames=0;fpsT=now}
+    await sleep(Math.max(0,70-(performance.now()-t)));
+  }
+}
+let sentStart=false;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* ---------- handling a server reply ---------- */
+function handle(j){
+  drawOverlay(j);
+  const n=j.hands.length;
+  if(kind=="words"){
+    if(j.state=="signing")setBadge(`Signing… ${j.seconds}s`,"signing");
+    else setBadge(n?"Hands seen — keep signing":"Ready — show your hands",n?"waiting":"ready");
+    if(j.event)onWord(j.event);
+  }else{
+    setBadge(n?"Hand detected":"Show a hand",n?"waiting":"ready");
+    $("letter").textContent=j.letter?SPECIAL[j.letter]||j.letter:"—";$("letter").className="big-letter"+(j.letter?"":" mut");
+    $("prog").style.width=(j.progress*100)+"%";
+    $("letterSub").textContent=j.letter?`${j.letter.length>1?j.letter:""} ${Math.round(j.prob*100)}% confident`:"Hold a letter steady to type it.";
+    if(j.typed)typeLetter(j.typed,j.prob);
+  }
+}
+const SPECIAL={space:"␣",del:"⌫"};      // the letter model also has "space" and "delete" signs
+function typeLetter(l,p){
+  if(l=="space"){if(text&&!text.endsWith(" "))text+=" "}else if(l=="del")text=text.slice(0,-1);else text+=l;
+  paint();addHist(SPECIAL[l]?SPECIAL[l]+" "+l:l,p,true);
+}
+function setBadge(t,c){$("badgeTxt").textContent=t;$("badge").className="badge "+(c||"")}
+function onWord(ev){
+  if(!ev.top.length){$("word").textContent="—";$("word").className="word mut";$("wordSub").textContent="That was too short — try again.";$("top").innerHTML="";return}
+  const t=ev.top[0];
+  $("word").textContent=t.label;$("word").className="word"+(ev.accepted?"":" mut");
+  $("word").classList.remove("flash");void $("word").offsetWidth;if(ev.accepted)$("word").classList.add("flash");
+  $("wordSub").innerHTML=ev.accepted?`<span class="ok">Added to the sentence</span> · ${ev.frames} frames`:`<span style="color:var(--warn)">Not sure (${Math.round(t.prob*100)}%) — tap the right word below to add it</span>`;
+  $("top").innerHTML=ev.top.map((x,i)=>`<button class="bar" data-w="${x.label}"><i style="width:${Math.round(x.prob*100)}%"></i><span>${i+1}. ${x.label} &nbsp;${Math.round(x.prob*100)}%</span></button>`).join("");
+  $("top").querySelectorAll("button").forEach(b=>b.onclick=()=>{addWord(b.dataset.w);$("wordSub").textContent="Added “"+b.dataset.w+"” manually."});
+  if(ev.accepted){addWord(t.label,true);}
+  addHist(t.label,t.prob,ev.accepted);
+}
+function clearResult(){$("word").textContent="—";$("word").className="word mut";$("wordSub").textContent="Waiting for a sign.";$("top").innerHTML="";$("letter").textContent="—";$("prog").style.width="0"}
+
+/* ---------- sentence ---------- */
+function addWord(w,fromModel){text+=(text&&!text.endsWith(" ")?" ":"")+w;lastWord=w;paint();if(fromModel&&$("auto").checked)say(w)}
+function paint(){$("sentence").innerHTML=(text?escapeHtml(text):'<span class="mut">Decoded words appear here.</span>')+'<span class="cursor"></span>'}
+const escapeHtml=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+$("undo").onclick=()=>{text=kind=="letters"?text.slice(0,-1):text.replace(/\s*\S+\s*$/,"");paint()};
+$("clear").onclick=()=>{text="";paint()};
+$("spaceBtn").onclick=()=>{if(text&&!text.endsWith(" ")){text+=" ";paint()}};
+$("copy").onclick=async()=>{try{await navigator.clipboard.writeText(text);$("copy").textContent="Copied";setTimeout(()=>$("copy").textContent="Copy",1200)}catch(e){}};
+function say(t){if(!t||!("speechSynthesis" in window))return;speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(t))}
+$("speak").onclick=()=>say(text);
+function addHist(label,p,added){
+  $("histEmpty").style.display="none";const tr=document.createElement("tr");
+  tr.innerHTML=`<td class="mut">${new Date().toLocaleTimeString()}</td><td><b>${label}</b></td><td>${Math.round(p*100)}%</td><td class="${added?"ok":"mut"}">${added?"added":"unsure"}</td>`;
+  $("hist").prepend(tr);while($("hist").rows.length>60)$("hist").lastChild.remove();
+}
+
+/* ---------- hold to sign ---------- */
+const hb=$("hold");
+const hold=v=>{holding=v;hb.classList.toggle("live",v);hb.firstChild.textContent=v?"Signing… release to decode ":"Hold to sign "};
+hb.onmousedown=hb.ontouchstart=e=>{e.preventDefault();hold(true)};hb.onmouseup=hb.onmouseleave=hb.ontouchend=()=>hold(false);
+addEventListener("keydown",e=>{if(e.code=="Space"&&manual&&kind=="words"&&!e.repeat&&!/INPUT|SELECT|BUTTON/.test(document.activeElement.tagName)){e.preventDefault();hold(true)}});
+addEventListener("keyup",e=>{if(e.code=="Space"&&manual&&kind=="words")hold(false)});
+
+/* ---------- landmark overlay ---------- */
+function drawOverlay(j){
+  const c=$("ov"),v=$("cam"),W=c.width=c.clientWidth*devicePixelRatio,H=c.height=c.clientHeight*devicePixelRatio,g=c.getContext("2d");
+  g.clearRect(0,0,W,H);g.lineWidth=2*devicePixelRatio;
+  const P=p=>[p[0]*W,p[1]*H];
+  if(j.pose){g.strokeStyle="#ffd24d";ARMS.forEach(([a,b])=>{const A=j.pose[a],B=j.pose[b];if(A&&B){g.beginPath();g.moveTo(...P(A));g.lineTo(...P(B));g.stroke()}})}
+  (j.hands||[]).forEach((h,i)=>{
+    g.strokeStyle=g.fillStyle=i?"#5ec8ff":"#6dffb0";
+    HAND.forEach(([a,b])=>{const A=h[a],B=h[b];if(A&&B){g.beginPath();g.moveTo(...P(A));g.lineTo(...P(B));g.stroke()}});
+    h.forEach(p=>{if(p){const[x,y]=P(p);g.beginPath();g.arc(x,y,3*devicePixelRatio,0,7);g.fill()}});
+  });
+}
+boot();
+</script></body></html>
