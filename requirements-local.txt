@@ -7,3 +7,4 @@ joblib
 torch          # CPU build is enough: pip install torch --index-url https://download.pytorch.org/whl/cpu
 # optional, only for the pretrained TFLite ASL model in the demo:
 # tensorflow
+flask

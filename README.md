@@ -9,6 +9,7 @@ slr/            shared library (landmarks, word model, inference)
 scripts/        letters.py  include_extract.py  asl_words.py  train_words.py   (run on Kaggle or locally)
 notebooks/      day1_setup_letters_include.ipynb  day2a_asl_words.ipynb  day2b_isl_words.ipynb  (generated)
 demo/app.py     OpenCV webcam demo
+web/app.py      browser interface: record with the webcam, predict, log, accuracy panel
 tools/          record_clips.py  evaluate_clips.py  make_notebooks.py
 models/         put the downloaded Kaggle output here
 ```
@@ -53,3 +54,15 @@ python tools/evaluate_clips.py letters --lang asl --images images
 - Word-level ISL uses my own trainer rather than AI4Bharat's `runner.py`: their `generate_keypoints.py` targets an old
   MediaPipe API and a full local copy of the dataset. The keypoints here are a different format, so `runner.py` cannot read them.
 - INCLUDE-50 gets ~94% in the paper with their pipeline; expect lower with this small model - report what you measure.
+
+## Web evaluator (browser)
+```
+pip install -r requirements-local.txt
+python web/app.py --models models        # open http://localhost:5000
+```
+Choose ISL/ASL, pick the *true* word, press Record (3-2-1, then it films for N seconds). The server extracts keypoints,
+shows top-3 predictions, and logs the attempt to `results/web_log.csv`; the Evaluation panel shows top-1/top-3, per-word
+accuracy and common confusions. Clips are saved to `clips/<lang>/<word>/`. Letters mode predicts live from the camera.
+Browsers only allow camera access on `http://localhost` (or https), so open the page on the machine that runs the server.
+On a Raspberry Pi with a screen and camera, run it there and open `http://localhost:5000` in the Pi's browser.
+Opening `http://<pi-address>:5000` from another computer will NOT get camera access without https.
