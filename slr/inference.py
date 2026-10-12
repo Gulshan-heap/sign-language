@@ -44,13 +44,19 @@ class Models:
             elif (d / f"{lang}_letters.joblib").exists():
                 import joblib
                 self.letters[lang] = joblib.load(d / f"{lang}_letters.joblib")
-        try:
-            from .word_model import load_model
-            for lang in ("asl", "isl"):
-                if (d / f"{lang}_words.pt").exists():
+        for lang in ("asl", "isl"):
+            if (d / f"{lang}_words_np.npz").exists():             # numpy-only model: no torch needed (see tools/export_words_np.py)
+                from .numpy_word_model import NumpyWordModel
+                m = NumpyWordModel(d / f"{lang}_words_np.npz")
+                self.words[lang] = (m, m.labels)
+        todo = [l for l in ("asl", "isl") if l not in self.words and (d / f"{l}_words.pt").exists()]
+        if todo:                                                   # torch is only imported when a .pt has no numpy version
+            try:
+                from .word_model import load_model
+                for lang in todo:
                     self.words[lang] = load_model(d / f"{lang}_words.pt")
-        except ImportError:
-            pass
+            except ImportError:
+                pass
 
     def available(self, mode):
         lang, kind = mode.split("_")
@@ -70,6 +76,8 @@ class Models:
         return m.classes[i], float(p[i])
 
     def word(self, lang, kp67):
-        from .word_model import predict
         model, labels = self.words[lang]
+        if hasattr(model, "predict"):                              # NumpyWordModel
+            return [(labels[i], p) for i, p in model.predict(kp67)]
+        from .word_model import predict
         return [(labels[i], p) for i, p in predict(model, kp67)]

@@ -65,6 +65,9 @@ python web/live.py --models models       # open http://localhost:5001 and press 
 - **Letters** (ASL): fingerspell; hold each letter ~1 s to type it. The `space` and `del` signs act as keys.
 - Uses `slr/live.py` for the segmentation; needs `models/{asl,isl}_words.pt` and `asl_letters_np.npz` (unzip the Kaggle
   output, e.g. `models/asl_models.zip`, into the project root). A mode whose model is missing says so instead of decoding.
+- Low-memory / hosted use: `python tools/export_words_np.py models` writes `<lang>_words_np.npz` (run once, needs torch).
+  The server prefers these and then does not import torch (~175 MB less RAM); `requirements.txt` is for Render.
+  Re-run the export after retraining a word model.
 - The page shows what each model can recognise - signs outside that list will be mapped to the nearest known word.
 
 ## Web evaluator (browser)

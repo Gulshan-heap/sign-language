@@ -1,8 +1,6 @@
 # Deployment (Render). For a laptop use requirements-local.txt.
---extra-index-url https://download.pytorch.org/whl/cpu
 flask
 gunicorn
 mediapipe==0.10.14
 numpy
-torch
 opencv-python-headless
