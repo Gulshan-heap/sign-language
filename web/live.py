@@ -7,6 +7,7 @@ training), cuts the stream into signs (a sign = hands appear ... hands leave) an
 Letters mode types fingerspelled letters live. Nothing leaves your machine. (Camera access needs http://localhost.)
 """
 import argparse
+import os
 import sys
 import threading
 import time
@@ -104,20 +105,26 @@ def frame():
     return jsonify(out)
 
 
+def init(models_dir):
+    for name in ("hand_landmarker.task", "pose_landmarker_lite.task"):
+        model_path(name)                                  # fetch once now instead of during the first frame
+    STATE.update(models=Models(models_dir), models_dir=models_dir)
+    M = STATE["models"]
+    print("word models:", list(M.words), "| letter models:", list(M.letters))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default=str(ROOT / "models"))
     ap.add_argument("--port", type=int, default=5001)
     ap.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to open it from another device (camera needs https there)")
     a = ap.parse_args()
-    for name in ("hand_landmarker.task", "pose_landmarker_lite.task"):
-        model_path(name)                                  # fetch once now instead of during the first frame
-    STATE.update(models=Models(a.models), models_dir=a.models)
-    M = STATE["models"]
-    print("word models:", list(M.words), "| letter models:", list(M.letters))
+    init(a.models)
     print(f"open http://localhost:{a.port}")
     app.run(host=a.host, port=a.port, threaded=True)
 
 
 if __name__ == "__main__":
     main()
+else:                                                      # imported by a WSGI server (Render): gunicorn --chdir web live:app
+    init(os.environ.get("SLR_MODELS", str(ROOT / "models")))

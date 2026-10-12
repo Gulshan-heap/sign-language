@@ -1,2 +1,3 @@
 *.venv/
 *.npz
+!models/*_letters_np.npz
