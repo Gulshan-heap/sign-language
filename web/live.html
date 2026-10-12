@@ -65,6 +65,7 @@ kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;paddi
    <div id="drop" class="empty" style="display:none;background:#2f6fedcc;z-index:3">Drop the video to decode it</div>
   </div>
   <div class="row" id="upRow">
+   <button id="stopCam" style="display:none" title="Turn the camera off">&#9632; Stop camera</button>
    <button id="upBtn">&#11014; Upload a video</button><input type="file" id="file" accept="video/*" hidden>
    <select id="upMode" title="Does the video contain one sign or a whole sentence?"><option value="word">One sign in the video</option><option value="sentence">Several signs (split into words)</option></select>
    <button id="closeClip" style="display:none">&#10005; Back to camera</button>
@@ -150,14 +151,23 @@ $("thr").oninput=()=>$("thrV").textContent=$("thr").value+"%";
 async function startCam(){
   try{stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});}
   catch(e){setStatus("camera blocked: "+e.message,"bad");return}
-  $("cam").srcObject=stream;await $("cam").play();$("empty").style.display="none";
+  $("cam").srcObject=stream;await $("cam").play();$("empty").style.display="none";$("stopCam").style.display="";
   const v=$("cam");document.querySelector(".stage").style.aspectRatio=(v.videoWidth||640)+"/"+(v.videoHeight||480);
-  running=true;pending="reset";loop();
+  running=true;pending="reset";loop(++loopId);
 }
-$("camBtn").onclick=startCam;
+$("camBtn").onclick=()=>{if(!running)startCam()};
+function stopCam(){
+  running=false;loopId++;                                       // ends the frame loop (a request already in flight is ignored)
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}  // releases the camera: the browser's recording indicator goes off
+  $("cam").srcObject=null;hold(false);noShoulders=0;
+  const c=$("ov");c.getContext("2d").clearRect(0,0,c.width,c.height);
+  $("empty").style.display="flex";$("stopCam").style.display="none";$("frameWarn").style.display="none";$("perf").textContent="";
+  if(!clipOpen)setBadge("Camera off","");
+}
+$("stopCam").onclick=stopCam;
 const grab=document.createElement("canvas");
-async function loop(){
-  while(running){
+async function loop(id){
+  while(running&&id==loopId){
     const t=performance.now(),v=$("cam");
     if(clipOpen){await sleep(200);continue}                       // a recorded video is on screen: pause the live feed
     if(!pick(kind,lang).length){setBadge("No model for this selection","");await sleep(500);continue}
@@ -171,12 +181,13 @@ async function loop(){
     let j;
     try{const r=await fetch("/api/frame",{method:"POST",body:fd});j=await r.json();if(!r.ok){setBadge(j.error||"error","");await sleep(500);continue}}
     catch(e){setBadge("server not reachable","");await sleep(800);continue}
+    if(!running||id!=loopId)break;                              // camera was stopped while this frame was in flight
     handle(j);
     frames++;const now=performance.now();if(now-fpsT>1000){$("perf").textContent=Math.round(frames*1000/(now-fpsT))+" fps · "+j.ms+" ms/frame";frames=0;fpsT=now}
     await sleep(Math.max(0,70-(performance.now()-t)));
   }
 }
-let sentStart=false,noShoulders=0,lastId=null;
+let sentStart=false,noShoulders=0,lastId=null,loopId=0;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 /* ---------- uploaded video ---------- */
@@ -193,7 +204,7 @@ function openClip(f){
   $("clipv").src=clipUrl;$("clipv").style.display="block";$("closeClip").style.display="";clipOpen=true;
   $("ov").getContext("2d").clearRect(0,0,$("ov").width,$("ov").height);
 }
-$("closeClip").onclick=()=>{$("clipv").pause();$("clipv").style.display="none";$("closeClip").style.display="none";$("upMsg").textContent="";clipOpen=false;pending="reset";setBadge(running?"Ready — show your hands":"Camera off","ready")};
+$("closeClip").onclick=()=>{$("clipv").pause();$("clipv").style.display="none";$("closeClip").style.display="none";$("upMsg").textContent="";clipOpen=false;pending="reset";setBadge(running?"Ready — show your hands":"Camera off",running?"ready":"")};
 async function uploadVideo(f){
   if(!pick(kind,lang).length){$("upMsg").innerHTML='<span class="bad">No '+lang.toUpperCase()+' '+kind+' model available.</span>';return}
   openClip(f);$("upBtn").disabled=$("upBtn2").disabled=true;

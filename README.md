@@ -65,6 +65,7 @@ Options: `--models <dir>`, `--port <n>` (default 5001), `--host 0.0.0.0` (serve 
 
 ## Using the dashboard
 
+0. Press **Start camera** to begin and **Stop camera** to end the feed; stopping releases the camera completely.
 1. Choose **Words** or **Letters** and **ISL** or **ASL** at the top. The panel at the bottom lists every sign the
    selected model knows; anything else is mapped to the closest known sign.
 2. **Words, Auto mode**: sign one word, then lower your hands out of view. It is decoded about 0.7 s after your hands leave.
@@ -221,19 +222,6 @@ Served by `web/live.py`. All POST bodies are `multipart/form-data`.
 | `python tools/evaluate_clips.py letters --lang asl --images images` | Same for letter images |
 | `python tools/export_words_np.py models` | Convert `.pt` word models to numpy (needed after every retraining) |
 
-## Limitations
-
-- **Small vocabulary**: 23 ASL and 51 ISL signs. The model always picks one of them, so a sign outside the list, or a
-  careless one, can produce a confident wrong answer. Use the confidence slider and the top-3 suggestions.
-- **Domain shift**: training data was recorded under controlled conditions. Accuracy on a different camera, lighting or
-  signing style is lower; collect your own clips to adapt.
-- **Isolated signs only**: words are classified one at a time. There is no continuous sentence recognition or grammar.
-- **ISL letters**: the pipeline supports them, but no ISL fingerspelling model is included.
-- **Static letters work best**: `J` and `Z` involve motion, which the single-frame letter model cannot capture.
-- **Single user**: the live session state is global (see [Deployment](#deployment-render)).
-- **Own ISL trainer**: ISL words use this repository's trainer, not AI4Bharat's `runner.py`, whose keypoint format is
-  different. The published INCLUDE-50 accuracy (~94 %) used their pipeline; compare with the numbers you measure.
-
 ## Troubleshooting
 
 | Problem | Fix |
@@ -254,4 +242,4 @@ Served by `web/live.py`. All POST bodies are `multipart/form-data`.
 - [Google - Isolated Sign Language Recognition](https://www.kaggle.com/competitions/asl-signs) (`asl-signs`) data for ASL words.
 - ASL Alphabet and ISL fingerspelling image datasets for the letter models.
 
-No license has been specified yet; add a `LICENSE` file before sharing or reusing the code publicly.
+
