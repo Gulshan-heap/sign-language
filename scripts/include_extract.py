@@ -104,6 +104,37 @@ def process_part(part, out, splits, stride, tmp_root):
     return part, done, skipped
 
 
+def show_parts():
+    """Print the Zenodo zip parts (a quick check that Internet/Zenodo work); downloads nothing."""
+    parts = list_parts()
+    for k, s in parts:
+        print(f"{k:40s} {s / 1e9:5.2f} GB")
+    print(f"{len(parts)} parts, {sum(s for _, s in parts) / 1e9:.1f} GB total (we won't download all of it)")
+
+
+def extract_include(out, parts=None, workers=8, stride=2, tmp=None):
+    """INCLUDE-50 videos -> keypoint .npz files in <out>/<split>/ (resumable). `parts` = zip names, default every part."""
+    for m in MODELS:
+        model_path(m)                                # download the MediaPipe models once, before the workers start
+    splits = load_splits()
+    print(f"INCLUDE-50 split: {len(splits)} videos, {len({slug(k[0]) for k in splits})} classes")
+    names = parts or [k for k, _ in list_parts()]
+    Path(out).mkdir(parents=True, exist_ok=True)
+    tmp_root = tmp or tempfile.gettempdir()
+    t0 = time.time()
+    with ProcessPoolExecutor(workers) as ex:
+        futs = [ex.submit(process_part, p, out, splits, stride, tmp_root) for p in names]
+        for f in as_completed(futs):
+            part, done, skipped = f.result()
+            print(f"[{time.time() - t0:6.0f}s] {part}: {done} new, {skipped} already done" if skipped >= 0
+                  else f"[{part}] FAILED - rerun to retry")
+    n = {s: len(list((Path(out) / s).glob('*.npz'))) for s in ("train", "val", "test")}
+    print("keypoint files:", n, "of expected", {s: sum(v == s for v in splits.values()) for s in n})
+    labels = sorted({p.name.split("__")[0] for p in Path(out).glob("*/*.npz")})
+    Path(out, "labels.json").write_text(json.dumps(labels, indent=2))
+    print(f"{len(labels)} classes found -> {Path(out, 'labels.json')}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
@@ -113,32 +144,10 @@ def main():
     ap.add_argument("--tmp", default=None, help="scratch dir for the one-video-at-a-time download")
     ap.add_argument("--list", action="store_true")
     a = ap.parse_args()
-
-    parts = list_parts()
     if a.list:
-        for k, s in parts:
-            print(f"{k:40s} {s / 1e9:5.2f} GB")
-        print(f"{len(parts)} parts, {sum(s for _, s in parts) / 1e9:.1f} GB total (we won't download all of it)")
-        return
-    for m in MODELS:
-        model_path(m)                                # download the MediaPipe models once, before the workers start
-    splits = load_splits()
-    print(f"INCLUDE-50 split: {len(splits)} videos, {len({slug(k[0]) for k in splits})} classes")
-    names = a.parts or [k for k, _ in parts]
-    Path(a.out).mkdir(parents=True, exist_ok=True)
-    tmp_root = a.tmp or tempfile.gettempdir()
-    t0 = time.time()
-    with ProcessPoolExecutor(a.workers) as ex:
-        futs = [ex.submit(process_part, p, a.out, splits, a.stride, tmp_root) for p in names]
-        for f in as_completed(futs):
-            part, done, skipped = f.result()
-            print(f"[{time.time() - t0:6.0f}s] {part}: {done} new, {skipped} already done" if skipped >= 0
-                  else f"[{part}] FAILED - rerun to retry")
-    n = {s: len(list((Path(a.out) / s).glob('*.npz'))) for s in ("train", "val", "test")}
-    print("keypoint files:", n, "of expected", {s: sum(v == s for v in splits.values()) for s in n})
-    labels = sorted({p.name.split("__")[0] for p in Path(a.out).glob("*/*.npz")})
-    Path(a.out, "labels.json").write_text(json.dumps(labels, indent=2))
-    print(f"{len(labels)} classes found -> {Path(a.out, 'labels.json')}")
+        show_parts()
+    else:
+        extract_include(a.out, a.parts, a.workers, a.stride, a.tmp)
 
 
 if __name__ == "__main__":

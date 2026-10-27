@@ -50,22 +50,23 @@ def _extract_chunk(args):
     return out
 
 
-def cmd_extract(a):
+def extract_letters(images, lang, out, per_class=300, workers=4, skip=("nothing",)):
+    """Images (one folder per letter) -> hand-landmark features saved as <out>/<lang>_letters.npz."""
     from joblib import Parallel, delayed
-    n_hands = N_HANDS[a.lang]
+    n_hands = N_HANDS[lang]
     model_path("hand_landmarker.task")          # download once here, not in every worker
-    root = find_class_root(a.images)
-    classes = sorted(d.name for d in root.iterdir() if d.is_dir() and d.name not in set(a.skip))
+    root = find_class_root(images)
+    classes = sorted(d.name for d in root.iterdir() if d.is_dir() and d.name not in set(skip))
     print(f"class root: {root}\n{len(classes)} classes: {classes}")
     rng = random.Random(0)
     items = []
     for ci, c in enumerate(classes):
         files = sorted(f for f in (root / c).iterdir() if f.suffix.lower() in IMG_EXT)
         rng.shuffle(files)
-        items += [(f, ci) for f in files[: a.per_class]]
+        items += [(f, ci) for f in files[: per_class]]
     rng.shuffle(items)
     chunks = [(items[i:i + 100], n_hands) for i in range(0, len(items), 100)]
-    res = Parallel(n_jobs=a.workers, verbose=5)(delayed(_extract_chunk)(c) for c in chunks)
+    res = Parallel(n_jobs=workers, verbose=5)(delayed(_extract_chunk)(c) for c in chunks)
     rows = [r for chunk in res for r in chunk]
     if not rows:
         sys.exit("No hands detected in any image - check --images points at the right dataset")
@@ -76,12 +77,13 @@ def cmd_extract(a):
     for ci, c in enumerate(classes):
         tot = sum(1 for _, yy in items if yy == ci)
         print(f"  {c:>8}: detected {int((y == ci).sum()) // 2}/{tot}")
-    Path(a.out).mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(Path(a.out) / f"{a.lang}_letters.npz", X=X, y=y, mirrored=m, img_id=img_id, classes=np.array(classes))
-    print("saved", Path(a.out) / f"{a.lang}_letters.npz")
+    Path(out).mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(Path(out) / f"{lang}_letters.npz", X=X, y=y, mirrored=m, img_id=img_id, classes=np.array(classes))
+    print("saved", Path(out) / f"{lang}_letters.npz")
 
 
-def cmd_train(a):
+def train_letters(lang, data, out):
+    """Train SVC / MLP / ExtraTrees on <data>/<lang>_letters.npz, keep the best, save it (plus a numpy copy) in <out>."""
     import joblib
     from sklearn.ensemble import ExtraTreesClassifier
     from sklearn.metrics import classification_report
@@ -90,7 +92,7 @@ def cmd_train(a):
     from sklearn.preprocessing import StandardScaler
     from sklearn.svm import SVC
 
-    d = np.load(Path(a.data) / f"{a.lang}_letters.npz")
+    d = np.load(Path(data) / f"{lang}_letters.npz")
     X, y, img, classes = d["X"], d["y"], d["img_id"], list(d["classes"])
     ids = np.unique(img)
     rng = np.random.default_rng(0); rng.shuffle(ids)
@@ -113,22 +115,30 @@ def cmd_train(a):
     best.fit(X[m["train"] | m["val"]], y[m["train"] | m["val"]])
     print(f"\nbest = {best_name}; test acc {best.score(X[m['test']], y[m['test']]):.4f}")
     print(classification_report(y[m["test"]], best.predict(X[m["test"]]), target_names=classes, zero_division=0))
-    Path(a.out).mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": best, "classes": classes, "n_hands": N_HANDS[a.lang], "kind": best_name},
-                Path(a.out) / f"{a.lang}_letters.joblib")
-    print("saved", Path(a.out) / f"{a.lang}_letters.joblib")
+    Path(out).mkdir(parents=True, exist_ok=True)
+    joblib.dump({"model": best, "classes": classes, "n_hands": N_HANDS[lang], "kind": best_name},
+                Path(out) / f"{lang}_letters.joblib")
+    print("saved", Path(out) / f"{lang}_letters.joblib")
 
     # Raspberry-Pi-friendly copy: plain numpy weights, so the Pi needs neither scikit-learn nor a matching version
     mlp = models["mlp"]
     mlp.fit(X[m["train"] | m["val"]], y[m["train"] | m["val"]])
     print(f"numpy-export MLP test acc {mlp.score(X[m['test']], y[m['test']]):.4f}")
     sc, net = mlp.steps[0][1], mlp.steps[1][1]
-    arrays = {"mean": sc.mean_, "scale": sc.scale_, "classes": np.array(classes), "n_hands": np.array(N_HANDS[a.lang]),
+    arrays = {"mean": sc.mean_, "scale": sc.scale_, "classes": np.array(classes), "n_hands": np.array(N_HANDS[lang]),
               "n_layers": np.array(len(net.coefs_))}
     for i, (w, b) in enumerate(zip(net.coefs_, net.intercepts_)):
         arrays[f"w{i}"], arrays[f"b{i}"] = w, b
-    np.savez(Path(a.out) / f"{a.lang}_letters_np.npz", **arrays)
-    print("saved", Path(a.out) / f"{a.lang}_letters_np.npz", "(use this one on the Raspberry Pi)")
+    np.savez(Path(out) / f"{lang}_letters_np.npz", **arrays)
+    print("saved", Path(out) / f"{lang}_letters_np.npz", "(use this one on the Raspberry Pi)")
+
+
+def cmd_extract(a):
+    extract_letters(a.images, a.lang, a.out, a.per_class, a.workers, a.skip)
+
+
+def cmd_train(a):
+    train_letters(a.lang, a.data, a.out)
 
 
 if __name__ == "__main__":

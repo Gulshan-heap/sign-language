@@ -3,3 +3,4 @@
 !models/*_np.npz
 __pycache__/
 *.pyc
+work/

@@ -1,7 +1,9 @@
-"""Generate the Kaggle/Colab notebooks and the code bundle to upload.
+"""Generate the notebooks and the code bundle.
 
   python tools/make_notebooks.py
 -> notebooks/day1_*.ipynb, day2a_asl_words.ipynb, day2b_isl_words.ipynb, dist/slr_code.zip
+
+The notebooks are plain Python: they import the functions from scripts/ and slr/ instead of running shell commands.
 """
 import json
 import zipfile
@@ -22,135 +24,171 @@ def nb(cells):
 
 
 SETUP = ("code", '''
-# Finds the uploaded "slr-code" dataset wherever Kaggle mounts it (the path differs between Kaggle versions).
-import glob, os, shutil, subprocess, sys, zipfile
-ON_KAGGLE = os.path.exists("/kaggle/input")
-WORK = "/kaggle/working" if ON_KAGGLE else "/content"
-CODE = f"{WORK}/code"
-hits = [h for d in ("*", "*/*", "*/*/*") for h in glob.glob(f"/kaggle/input/{d}/slr/__init__.py")] + glob.glob("/content/slr_code/**/slr/__init__.py", recursive=True)  # shallow search: ASL Alphabet has ~87k files
-if hits:
-    shutil.copytree(os.path.dirname(os.path.dirname(hits[0])), CODE, dirs_exist_ok=True)
-else:
-    zips = [h for d in ("*", "*/*", "*/*/*") for h in glob.glob(f"/kaggle/input/{d}/slr_code.zip")] + glob.glob("/content/**/slr_code.zip", recursive=True)
-    if zips:
-        zipfile.ZipFile(zips[0]).extractall(CODE)
-    else:
-        print("slr-code NOT FOUND. Add it: right sidebar -> + Add Input -> Your Datasets -> slr-code. Currently attached:")
-        for p in sorted(glob.glob("/kaggle/input/*") + glob.glob("/kaggle/input/*/*")):
-            print("  ", p)
-        raise SystemExit("Attach the slr-code dataset, then run this cell again.")
-os.chdir(CODE)
-print("code ready in", CODE, os.listdir(CODE))
-# Install each package on its own so one failure cannot skip the others. Kaggle now runs Python 3.13, so we use the
-# current mediapipe (Tasks API) - not the old pinned version.
-for pkg in ("mediapipe", "remotezip", "opencv-python-headless"):
-    r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", pkg], capture_output=True, text=True)
-    print(pkg, "OK" if r.returncode == 0 else "FAILED\\n" + r.stderr[-600:])
-import mediapipe; print("mediapipe", mediapipe.__version__)
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+ROOT = Path.cwd() if (Path.cwd() / "slr").exists() else Path.cwd().parent   # the project folder
+sys.path.insert(0, str(ROOT))
+os.environ["PYTHONPATH"] = str(ROOT)      # so worker processes can import our code too
+
+MODELS = ROOT / "models"                  # the models we already trained (only read here)
+WORK = ROOT / "work"                      # everything this notebook creates goes here, so MODELS is never overwritten
+print("project folder:", ROOT)
 ''')
+
+
+def architecture_cells(name):
+    return [
+        ("markdown", "## 0b. The transformer architecture\n"
+                     "The class is `WordTransformer` in `slr/word_model.py`. Each of the 32 frames of a sign is one token: "
+                     "`Linear` -> + positional embedding -> 3 x `TransformerEncoderLayer` (4 attention heads) -> average over frames -> `Linear` -> word."),
+        ("code", f'''
+from slr.word_model import load_model
+
+model, labels = load_model(MODELS / "{name}_words.pt")
+print(model)
+print("parameters:", sum(p.numel() for p in model.parameters()))
+'''),
+        ("code", '''
+import torch
+
+x = torch.zeros(1, 32, 270)               # one sign: 32 frames x 270 features per frame
+h = model.inp(x) + model.pos              # every frame embedded to 128 numbers + its position
+print("after embedding      :", tuple(h.shape))
+h = model.enc(h)                          # 3 self-attention layers: frames look at each other
+print("after transformer    :", tuple(h.shape))
+print("final scores (words) :", tuple(model(x).shape))
+'''),
+    ]
 
 
 DAY1 = nb([
-    ("markdown", "# Day 1 - letters + INCLUDE keypoints (CPU only, Internet ON)\n"
-                 "Inputs needed: `slr-code`, ASL Alphabet (https://www.kaggle.com/datasets/grassknoted/asl-alphabet) and, optionally, an ISL "
-                 "alphabet image dataset. The pretrained-ASL smoke test and the `asl-signs` competition are NOT needed here: they belong to Day 2 (ASL)."),
+    ("markdown", "# Day 1 - letters + INCLUDE keypoints (CPU only)\n"
+                 "Needs the ASL Alphabet images (https://www.kaggle.com/datasets/grassknoted/asl-alphabet) and, optionally, an ISL "
+                 "alphabet image dataset. Download them once and point the paths below at them. The training cells are skipped "
+                 "when a folder is missing."),
     SETUP,
-    ("markdown", "## 1. Letters: ~300 images per letter -> hand landmarks -> classifier (minutes on CPU)\n"
-                 "Open the *Input* panel (right sidebar), hover the dataset, click the copy-path icon, paste below. "
-                 "Set `ISL_IMAGES = None` if you have no ISL letter images yet - ASL still runs, ISL letters can be added later."),
+    ("markdown", "## 0. The letter model we already trained\n"
+                 "It is a small neural network (MLP) on the 21 hand landmarks of one image."),
     ("code", '''
-import glob
-_asl = [p for d in ("*", "*/*", "*/*/*") for p in glob.glob(f"/kaggle/input/{d}") if "asl-alphabet" in p.lower() and os.path.isdir(p)]
-print("ASL alphabet candidates:", _asl)
-ASL_IMAGES = min(_asl, key=len)                      # shortest = the dataset root; class folders are auto-detected
-ISL_IMAGES = None                                    # e.g. "/kaggle/input/<your-isl-alphabet-dataset>"
-for lang, root in [("asl", ASL_IMAGES), ("isl", ISL_IMAGES)]:
-    if root is None:
-        print("skipping", lang); continue
-    !python scripts/letters.py extract --images $root --lang $lang --out $WORK/letters --per-class 300 --workers 4
-    !python scripts/letters.py train --lang $lang --data $WORK/letters --out $WORK/models
+from slr.inference import NumpyMLP
+
+asl_letters = NumpyMLP(MODELS / "asl_letters_np.npz")
+print(len(asl_letters.classes), "letters:", asl_letters.classes)
+'''),
+    ("markdown", "## 1. Letters: ~300 images per letter -> hand landmarks -> classifier (minutes on CPU)\n"
+                 "Set the two paths to the folders that contain one sub-folder per letter. Leave `ISL_IMAGES = None` if you have no "
+                 "ISL letter images."),
+    ("code", '''
+from scripts.letters import extract_letters, train_letters
+
+ASL_IMAGES = ROOT / "data" / "asl-alphabet"          # <- edit: folder with one sub-folder per letter
+ISL_IMAGES = None                                    # e.g. ROOT / "data" / "isl-alphabet"
+
+for lang, images in [("asl", ASL_IMAGES), ("isl", ISL_IMAGES)]:
+    if images is None or not Path(images).exists():
+        print("skipping", lang, "- image folder not found")
+        continue
+    extract_letters(images, lang, WORK / "letters", per_class=300, workers=4)
+    train_letters(lang, WORK / "letters", WORK / "models")
 '''),
     ("markdown", "## 2. INCLUDE-50 keypoints (reads only the 50 signs' videos from each Zenodo part, deletes each video right after)\n"
-                 "Run `--list` first to check Internet/Zenodo. The second cell is the long one - use Save & Run All for it."),
+                 "Needs Internet and `pip install remotezip`. Run the first cell to check that Zenodo answers; the second one is the long one."),
     ("code", '''
-!python scripts/include_extract.py --out $WORK/include50 --list
-'''),
-    ("code", '''
-!python scripts/include_extract.py --out $WORK/include50 --workers 8 --stride 2
-!du -sh $WORK/include50
-'''),
-    ("markdown", "## 3. Save everything\n"
-                 "Save Version -> Save & Run All, then Output -> **New Dataset** to keep `models/`, `letters/`, `include50/`."),
-])
+from scripts.include_extract import show_parts, extract_include
 
-FIND = ("code", '''
-import glob, os
-def find_dir(marker, root="/kaggle/input", depth=5):
-    """Folder that directly contains `marker` (file or folder), searched shallowly - Kaggle mount paths differ between versions."""
-    for d in range(depth + 1):
-        for p in glob.glob(root + "/*" * d + "/" + marker):
-            return os.path.dirname(p)
-    return None
-''')
+show_parts()
+'''),
+    ("code", '''
+extract_include(WORK / "include50", workers=8, stride=2)
+print({split: len(list((WORK / "include50" / split).glob("*.npz"))) for split in ("train", "val", "test")})
+'''),
+])
 
 DAY2_ASL = nb([
     ("markdown", "# Day 2 (teammate A) - ASL words. CPU is enough; no Day-1 data needed.\n"
-                 "Inputs: `slr-code` and the competition **Google - Isolated Sign Language Recognition** "
-                 "(https://www.kaggle.com/competitions/asl-signs: click *Join Competition* / accept the rules once, then "
-                 "*+ Add Input -> Competition Data*). Internet ON. Never download the data; it is only attached."),
+                 "Needs the competition data **Google - Isolated Sign Language Recognition** "
+                 "(https://www.kaggle.com/competitions/asl-signs). Download it once and point `ASL_DATA` at the folder that contains "
+                 "`train.csv` and `train_landmark_files`. The training cells are skipped when the folder is missing."),
     SETUP,
-    FIND,
-    ("markdown", "## 1. Find the data and pick the signs"),
+    ("markdown", "## 0. The word model we already trained\n"
+                 "It is a transformer encoder over a 32-frame keypoint sequence (see `slr/word_model.py`). Its words and accuracy:"),
     ("code", '''
-ASL_DATA = find_dir("train_landmark_files")
-assert ASL_DATA, "asl-signs competition data not attached: + Add Input -> Competition Data -> asl-signs (accept the rules first)"
-print("data:", ASL_DATA)
+info = json.loads((MODELS / "asl_words.json").read_text())
+print(len(info["labels"]), "words:", info["labels"])
+print("accuracy:", info["metrics"])
+'''),
+    *architecture_cells("asl"),
+    ("markdown", "## 1. Pick the data and the signs"),
+    ("code", '''
+ASL_DATA = ROOT / "data" / "asl-signs"               # <- edit: folder with train.csv and train_landmark_files/
 SIGNS = "hello thankyou please yes no mom dad water eat drink go sleep happy sad like want home cat dog bird red blue green hungry sick".split()
+print("data found:", ASL_DATA.exists())
 '''),
     ("markdown", "## 2. Convert only these signs to keypoints and train (about 20-40 minutes on CPU)"),
     ("code", '''
-!python scripts/asl_words.py extract --data $ASL_DATA --signs {" ".join(SIGNS)} --per-sign 300 --out $WORK/asl_words
-!python scripts/train_words.py --data $WORK/asl_words --out $WORK/models/asl_words.pt --epochs 60
+from scripts.asl_words import extract_words
+from scripts.train_words import train_words
+
+if ASL_DATA.exists():
+    extract_words(ASL_DATA, SIGNS, WORK / "asl_words", per_sign=300)
+    train_words(WORK / "asl_words", WORK / "models" / "asl_words.pt", epochs=60)
+else:
+    print("skipping - ASL_DATA folder not found")
 '''),
     ("markdown", "## 3. (Optional) pretrained model benchmark - skip unless the team lead asks\n"
-                 "Needs a pretrained TFLite ASL model attached as an input; set `RUN_PRETRAINED = True` and `MODEL_DIR`."),
+                 "Needs a pretrained TFLite ASL model in a folder and `pip install tensorflow`; set `RUN_PRETRAINED = True` and `MODEL_DIR`."),
     ("code", '''
+from scripts.asl_words import benchmark_pretrained
+
 RUN_PRETRAINED = False
-MODEL_DIR = "/kaggle/input/sign-language"
+MODEL_DIR = ROOT / "data" / "sign-language"
 if RUN_PRETRAINED:
-    !python scripts/asl_words.py infer --model-dir $MODEL_DIR --data $ASL_DATA --signs {" ".join(SIGNS)} --per-sign 20 --out $WORK/models/asl_pretrained_eval.json
+    benchmark_pretrained(MODEL_DIR, ASL_DATA, SIGNS, WORK / "models" / "asl_pretrained_eval.json", per_sign=20)
 '''),
-    ("markdown", "## 4. Package for download"),
+    ("markdown", "## 4. Package the trained model into one zip"),
     ("code", '''
-!cd $WORK && zip -r asl_models.zip models && ls -lh asl_models.zip
+if (WORK / "models").exists():
+    print(shutil.make_archive(str(WORK / "asl_models"), "zip", WORK, "models"))
 '''),
-    ("markdown", "Then **Save Version -> Save & Run All**, open the Output tab and download `asl_models.zip`."),
 ])
 
 DAY2_ISL = nb([
-    ("markdown", "# Day 2 (teammate B) - ISL words (needs the Day-1 output dataset)\n"
-                 "Inputs: `slr-code` and the Day-1 output (a dataset or a notebook output that contains `include50/`). Internet ON. "
-                 "CPU is fine (5-15 minutes); GPU is optional."),
+    ("markdown", "# Day 2 (teammate B) - ISL words (needs the Day-1 INCLUDE-50 keypoints)\n"
+                 "Needs the `include50/` folder made by Day 1 (default: `work/include50`). CPU is fine (5-15 minutes); a GPU is "
+                 "used automatically if there is one. The training cell is skipped when the folder is missing."),
     SETUP,
-    FIND,
+    ("markdown", "## 0. The word model we already trained\n"
+                 "It is a transformer encoder over a 32-frame keypoint sequence (see `slr/word_model.py`). Its words and accuracy:"),
+    ("code", '''
+info = json.loads((MODELS / "isl_words.json").read_text())
+print(len(info["labels"]), "words:", info["labels"])
+print("accuracy:", info["metrics"])
+'''),
+    *architecture_cells("isl"),
     ("markdown", "## 1. Find the Day-1 keypoints"),
     ("code", '''
-INCLUDE_KP = find_dir("include50/train")
-assert INCLUDE_KP, "Day-1 output not attached: + Add Input -> your Day-1 dataset / notebook output (must contain include50/)"
-INCLUDE_KP = INCLUDE_KP + "/include50" if not INCLUDE_KP.endswith("include50") else INCLUDE_KP
-print("keypoints:", INCLUDE_KP)
-for s in ("train", "val", "test"):
-    print(s, len(glob.glob(f"{INCLUDE_KP}/{s}/*.npz")), "files")
+INCLUDE_KP = WORK / "include50"                      # <- edit if the Day-1 output is somewhere else
+for split in ("train", "val", "test"):
+    print(split, len(list((INCLUDE_KP / split).glob("*.npz"))), "files")
 '''),
     ("markdown", "## 2. Train (about 5-15 minutes)"),
     ("code", '''
-!python scripts/train_words.py --data $INCLUDE_KP --out $WORK/models/isl_words.pt --epochs 150 --seeds 3
+from scripts.train_words import train_words
+
+if (INCLUDE_KP / "train").exists():
+    train_words(INCLUDE_KP, WORK / "models" / "isl_words.pt", epochs=150, seeds=3)
+else:
+    print("skipping - run Day 1 first (no keypoints in", INCLUDE_KP, ")")
 '''),
-    ("markdown", "## 3. Package for download (a few MB)"),
+    ("markdown", "## 3. Package the trained model into one zip"),
     ("code", '''
-!cd $WORK && zip -r isl_models.zip models && ls -lh isl_models.zip
+if (WORK / "models").exists():
+    print(shutil.make_archive(str(WORK / "isl_models"), "zip", WORK, "models"))
 '''),
-    ("markdown", "Then **Save Version -> Save & Run All**, open the Output tab and download `isl_models.zip`."),
 ])
 
 

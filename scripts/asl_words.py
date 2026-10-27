@@ -75,34 +75,40 @@ def cmd_inspect(a):
               "switch to abhinand5/isolated-sign-language-recognition (the plan's fallback), or use `extract` + train_words.py.")
 
 
-def cmd_infer(a):
+def benchmark_pretrained(model_dir, data, signs, out, per_sign=20):
+    """Run a pretrained TFLite ASL model on the chosen signs and report top-1 / top-3 accuracy."""
     import tensorflow as tf
-    tfl, js, _ = find_model_files(a.model_dir)
+    tfl, js, _ = find_model_files(model_dir)
     if not tfl:
         sys.exit("no .tflite model in --model-dir (run `inspect`)")
     maps = [p for p in js if "sign_to_prediction" in p.name] or js
     s2i = json.loads(maps[0].read_text()); i2s = {v: k for k, v in s2i.items()}
     it = tf.lite.Interpreter(model_path=str(tfl[0]))
     runner = it.get_signature_runner("serving_default")
-    rows = pick_rows(a.data, a.signs, a.per_sign)
+    rows = pick_rows(data, signs, per_sign)
     results = []
     for _, r in rows.iterrows():
-        arr = read_sign_parquet(Path(a.data) / r["path"])
-        out = runner(inputs=arr)["outputs"]
-        top = np.argsort(out)[::-1][:3]
+        arr = read_sign_parquet(Path(data) / r["path"])
+        pred = runner(inputs=arr)["outputs"]
+        top = np.argsort(pred)[::-1][:3]
         results.append({"truth": r["sign"], "top3": [i2s[int(i)] for i in top]})
     top1 = np.mean([x["top3"][0] == x["truth"] for x in results]); top3 = np.mean([x["truth"] in x["top3"] for x in results])
     print(f"{len(results)} clips | top1 {top1:.3f} | top3 {top3:.3f}")
-    for s in a.signs:
+    for s in signs:
         rs = [x for x in results if x["truth"] == s]
         if rs:
             print(f"  {s:>10}: {np.mean([x['top3'][0] == s for x in rs]):.2f} ({len(rs)})")
-    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(a.out).write_text(json.dumps({"top1": top1, "top3": top3, "results": results}, indent=1))
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(json.dumps({"top1": top1, "top3": top3, "results": results}, indent=1))
 
 
-def cmd_extract(a):
-    rows = pick_rows(a.data, a.signs, a.per_sign or 0)
+def cmd_infer(a):
+    benchmark_pretrained(a.model_dir, a.data, a.signs, a.out, a.per_sign)
+
+
+def extract_words(data, signs, out, per_sign=0):
+    """Convert the chosen signs of the Google ISLR data to our keypoint .npz files in <out>/{train,val,test}/."""
+    rows = pick_rows(data, signs, per_sign or 0)
     rng = np.random.default_rng(0)
     # split by signer so test accuracy is honest
     people = rows["participant_id"].unique(); rng.shuffle(people)
@@ -110,10 +116,14 @@ def cmd_extract(a):
           for i, p in enumerate(people)}
     rows["split"] = rows["participant_id"].map(sp)
     for _, r in rows.iterrows():
-        dst = Path(a.out) / r["split"] / f"{r['sign']}__{r['sequence_id']}.npz"
+        dst = Path(out) / r["split"] / f"{r['sign']}__{r['sequence_id']}.npz"
         dst.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(dst, kp=to_compact(read_sign_parquet(Path(a.data) / r["path"])))
-    print(rows["split"].value_counts().to_dict(), "->", a.out)
+        np.savez_compressed(dst, kp=to_compact(read_sign_parquet(Path(data) / r["path"])))
+    print(rows["split"].value_counts().to_dict(), "->", out)
+
+
+def cmd_extract(a):
+    extract_words(a.data, a.signs, a.out, a.per_sign)
 
 
 if __name__ == "__main__":
