@@ -159,7 +159,7 @@ $("camBtn").onclick=()=>{if(!running)startCam()};
 function stopCam(){
   running=false;loopId++;                                       // ends the frame loop (a request already in flight is ignored)
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}  // releases the camera: the browser's recording indicator goes off
-  $("cam").srcObject=null;hold(false);noShoulders=0;
+  $("cam").srcObject=null;hold(false);noShoulders=0;$("frameWarn").style.display="none";
   const c=$("ov");c.getContext("2d").clearRect(0,0,c.width,c.height);
   $("empty").style.display="flex";$("stopCam").style.display="none";$("frameWarn").style.display="none";$("perf").textContent="";
   if(!clipOpen)setBadge("Camera off","");
@@ -229,8 +229,9 @@ function handle(j){
   drawOverlay(j);
   const n=j.hands.length;
   if(kind=="words"){
-    const sh=j.pose&&j.pose[11]&&j.pose[12];noShoulders=sh?0:(n?noShoulders+1:noShoulders);
-    $("frameWarn").style.display=noShoulders>15?"":"none";if(sh)noShoulders=0;
+    const inView=p=>p&&p[0]>.02&&p[0]<.98&&p[1]>.02&&p[1]<.98;   // MediaPipe also returns estimated points outside the picture
+    const sh=j.pose&&inView(j.pose[11])&&inView(j.pose[12]);noShoulders=sh?0:noShoulders+1;
+    $("frameWarn").style.display=noShoulders>15?"":"none";
     if(j.state=="signing")setBadge(`Signing… ${j.seconds}s`,"signing");
     else setBadge(n?"Hands seen — keep signing":"Ready — show your hands",n?"waiting":"ready");
     if(j.event)onWord(j.event);
