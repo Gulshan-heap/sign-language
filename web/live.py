@@ -20,6 +20,7 @@ from flask import Flask, jsonify, request
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from slr import landmarks  # noqa: E402
 from slr.inference import Models  # noqa: E402
 from slr.landmarks import FrameTracker, HandDetector, LH, RH, N_POSE, model_path  # noqa: E402
 from slr.live import MIN_HAND_FRAMES, LetterStabiliser, WordSegmenter, hands_visible  # noqa: E402
@@ -235,7 +236,9 @@ def main():
     ap.add_argument("--models", default=str(ROOT / "models"))
     ap.add_argument("--port", type=int, default=5001)
     ap.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to open it from another device (camera needs https there)")
+    ap.add_argument("--hand-conf", type=float, default=0.5, help="hand detection threshold (try 0.3 if the second hand is dropped)")
     a = ap.parse_args()
+    landmarks.HAND_CONF = a.hand_conf
     init(a.models)
     print(f"open http://localhost:{a.port}")
     app.run(host=a.host, port=a.port, threaded=True)

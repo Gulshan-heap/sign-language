@@ -20,6 +20,8 @@ N_POINTS = N_POSE + 42
 LH = slice(N_POSE, N_POSE + 21)
 RH = slice(N_POSE + 21, N_POSE + 42)
 
+HAND_CONF = 0.5          # MediaPipe hand detection / tracking threshold; lower keeps weaker (e.g. overlapping) hands
+
 # index permutation that mirrors a frame left <-> right
 _POSE_SWAP = {1: 4, 2: 5, 3: 6, 7: 8, 9: 10, 11: 12, 13: 14, 15: 16, 17: 18, 19: 20, 21: 22, 23: 24}
 FLIP_PERM = np.arange(N_POINTS)
@@ -66,7 +68,7 @@ class HandDetector:
         opts = vision.HandLandmarkerOptions(
             base_options=mpt.BaseOptions(model_asset_path=model_path("hand_landmarker.task")),
             running_mode=vision.RunningMode.VIDEO if video else vision.RunningMode.IMAGE,
-            num_hands=num_hands, min_hand_detection_confidence=0.5, min_tracking_confidence=0.5)
+            num_hands=num_hands, min_hand_detection_confidence=HAND_CONF, min_tracking_confidence=HAND_CONF)
         self.det = vision.HandLandmarker.create_from_options(opts)
 
     def detect(self, rgb):
