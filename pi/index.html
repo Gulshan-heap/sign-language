@@ -5,16 +5,18 @@
 body{margin:0;font:15px system-ui,sans-serif;background:#111;color:#eee}
 main{max-width:720px;margin:0 auto;padding:12px;display:grid;gap:12px}
 .stage{position:relative;aspect-ratio:4/3;background:#000;border-radius:10px;overflow:hidden}
-.stage img,.stage canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+.stage img,.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .word{font-size:44px;font-weight:700;min-height:52px}
 .sentence{border:1px dashed #555;border-radius:10px;padding:10px;font-size:22px;min-height:40px}
-.mut{color:#999;font-size:13px}.on{color:#5d5}.off{color:#e66}
+.mut{color:#999;font-size:13px}.on{color:#5d5}.off{color:#e66}.warn{color:#fb4}
 button,select{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid #555;background:#222;color:#eee}
+[hidden]{display:none!important}
 </style></head><body><main>
 <div class="row"><b>Sign Language on Raspberry Pi</b><span id="conn" class="off">connecting...</span>
- <span class="mut" id="perf"></span></div>
-<div class="stage"><img id="cam" alt=""><canvas id="ov"></canvas></div>
+ <span class="mut" id="src"></span><span class="mut" id="perf"></span></div>
+<div class="stage"><img id="cam" alt=""><video id="vid" autoplay playsinline muted hidden></video><canvas id="ov"></canvas></div>
+<div class="row" id="camRow" hidden><button id="camBtn">Start camera</button><span id="camMsg" class="warn"></span></div>
 <div class="row">
  <select id="lang"></select>
  <label class="mut">Min. confidence <input id="thr" type="range" min="5" max="95" value="50"> <b id="thrV">50%</b></label>
@@ -23,16 +25,18 @@ button,select{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid #
 <div class="word" id="word">-</div><div class="mut" id="top"></div>
 <div class="sentence" id="sentence"></div>
 </main><script>
-const $=id=>document.getElementById(id);let ws,text="",url=null;
+const $=id=>document.getElementById(id);let ws,text="",url=null,source="pi",stream=null,waiting=false,sentAt=0;
+const grab=document.createElement("canvas");
 function connect(){
-  ws=new WebSocket(`ws://${location.host}/ws`);ws.binaryType="blob";
-  ws.onopen=()=>{$("conn").textContent="connected";$("conn").className="on"};
+  ws=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/ws`);ws.binaryType="blob";
+  ws.onopen=()=>{$("conn").textContent="connected";$("conn").className="on";waiting=false};
   ws.onclose=()=>{$("conn").textContent="disconnected - retrying";$("conn").className="off";setTimeout(connect,1500)};
   ws.onmessage=e=>{
     if(typeof e.data!=="string"){if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(e.data);$("cam").src=url;return}
     const m=JSON.parse(e.data);
     if(m.type==="info"){$("lang").innerHTML=Object.keys(m.langs).map(l=>`<option ${l==m.lang?"selected":""}>${l}</option>`).join("");
-      $("thr").value=Math.round(m.thr*100);$("thrV").textContent=$("thr").value+"%";return}
+      $("thr").value=Math.round(m.thr*100);$("thrV").textContent=$("thr").value+"%";setSource(m.source);return}
+    waiting=false;                                    // the Pi answered: the next browser frame may go
     $("perf").textContent=`${m.fps} fps - ${m.ms} ms/frame`;$("state").textContent=m.state==="signing"?"signing...":"waiting for hands";
     draw(m);
     if(m.event){const ev=m.event,t=ev.top||[];
@@ -40,6 +44,31 @@ function connect(){
       if(ev.accepted){$("word").textContent=t[0].label;text+=t[0].label+" ";$("sentence").textContent=text}
       else $("word").textContent="?"}
   };
+}
+function setSource(s){
+  source=s||"pi";$("src").textContent=source==="browser"?"camera: this device":"camera: on the Pi";
+  $("camRow").hidden=source!=="browser";$("cam").hidden=source==="browser";$("vid").hidden=source!=="browser";
+  if(source==="browser"&&!window.isSecureContext)
+    $("camMsg").textContent="The camera needs https:// or http://localhost. Use the SSH tunnel or start the Pi with --cert.";
+}
+/* browser-camera mode: send one JPEG, wait for the Pi's reply, then send the next (no backlog on slow Wi-Fi) */
+$("camBtn").onclick=async()=>{
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;$("camBtn").textContent="Start camera";return}
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false})}
+  catch(e){$("camMsg").textContent="Camera blocked: "+e.name+(window.isSecureContext?"":" (page is not https or localhost)");return}
+  $("vid").srcObject=stream;$("camBtn").textContent="Stop camera";$("camMsg").textContent="";sendLoop();
+};
+async function sendLoop(){
+  while(stream){
+    const v=$("vid");
+    if(ws.readyState===1&&v.videoWidth&&(!waiting||performance.now()-sentAt>1000)){
+      grab.width=640;grab.height=Math.round(640*v.videoHeight/v.videoWidth);
+      grab.getContext("2d").drawImage(v,0,0,grab.width,grab.height);   // un-mirrored, like the training data
+      const blob=await new Promise(r=>grab.toBlob(r,"image/jpeg",.8));
+      if(blob&&stream){waiting=true;sentAt=performance.now();ws.send(blob)}
+    }
+    await new Promise(r=>setTimeout(r,15));
+  }
 }
 function draw(m){const c=$("ov"),W=c.width=c.clientWidth,H=c.height=c.clientHeight,g=c.getContext("2d");
   const dot=(p,col,r)=>{if(!p)return;g.fillStyle=col;g.beginPath();g.arc(p[0]*W,p[1]*H,r,0,7);g.fill()};

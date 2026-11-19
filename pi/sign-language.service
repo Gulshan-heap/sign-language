@@ -2,16 +2,16 @@
 #   sudo cp pi/sign-language.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now sign-language
 #   journalctl -u sign-language -f          # live log
-# Edit User and the two paths if your user name or folder differ.
+# Edit User and the paths if your user name or folder differ. pi/cert.pem and pi/key.pem come from pi/setup_pi.sh.
 [Unit]
-Description=Sign language recognition (WebSocket server)
+Description=Sign language recognition (WebSocket server, laptop camera)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=pi
 WorkingDirectory=/home/pi/sign_language
-ExecStart=/home/pi/sign_language/.venv/bin/python pi/ws_server.py --camera 0 --lang asl
+ExecStart=/home/pi/sign_language/.venv/bin/python pi/ws_server.py --camera browser --lang asl --cert pi/cert.pem --key pi/key.pem
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
