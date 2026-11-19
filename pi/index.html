@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign Language - Raspberry Pi</title>
+<style>
+body{margin:0;font:15px system-ui,sans-serif;background:#111;color:#eee}
+main{max-width:720px;margin:0 auto;padding:12px;display:grid;gap:12px}
+.stage{position:relative;aspect-ratio:4/3;background:#000;border-radius:10px;overflow:hidden}
+.stage img,.stage canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.word{font-size:44px;font-weight:700;min-height:52px}
+.sentence{border:1px dashed #555;border-radius:10px;padding:10px;font-size:22px;min-height:40px}
+.mut{color:#999;font-size:13px}.on{color:#5d5}.off{color:#e66}
+button,select{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid #555;background:#222;color:#eee}
+</style></head><body><main>
+<div class="row"><b>Sign Language on Raspberry Pi</b><span id="conn" class="off">connecting...</span>
+ <span class="mut" id="perf"></span></div>
+<div class="stage"><img id="cam" alt=""><canvas id="ov"></canvas></div>
+<div class="row">
+ <select id="lang"></select>
+ <label class="mut">Min. confidence <input id="thr" type="range" min="5" max="95" value="50"> <b id="thrV">50%</b></label>
+ <button id="reset">Reset</button><button id="clear">Clear text</button><span id="state" class="mut"></span>
+</div>
+<div class="word" id="word">-</div><div class="mut" id="top"></div>
+<div class="sentence" id="sentence"></div>
+</main><script>
+const $=id=>document.getElementById(id);let ws,text="",url=null;
+function connect(){
+  ws=new WebSocket(`ws://${location.host}/ws`);ws.binaryType="blob";
+  ws.onopen=()=>{$("conn").textContent="connected";$("conn").className="on"};
+  ws.onclose=()=>{$("conn").textContent="disconnected - retrying";$("conn").className="off";setTimeout(connect,1500)};
+  ws.onmessage=e=>{
+    if(typeof e.data!=="string"){if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(e.data);$("cam").src=url;return}
+    const m=JSON.parse(e.data);
+    if(m.type==="info"){$("lang").innerHTML=Object.keys(m.langs).map(l=>`<option ${l==m.lang?"selected":""}>${l}</option>`).join("");
+      $("thr").value=Math.round(m.thr*100);$("thrV").textContent=$("thr").value+"%";return}
+    $("perf").textContent=`${m.fps} fps - ${m.ms} ms/frame`;$("state").textContent=m.state==="signing"?"signing...":"waiting for hands";
+    draw(m);
+    if(m.event){const ev=m.event,t=ev.top||[];
+      $("top").textContent=t.map((x,i)=>`${i+1}. ${x.label} ${Math.round(x.prob*100)}%`).join("   ")||ev.reason||"";
+      if(ev.accepted){$("word").textContent=t[0].label;text+=t[0].label+" ";$("sentence").textContent=text}
+      else $("word").textContent="?"}
+  };
+}
+function draw(m){const c=$("ov"),W=c.width=c.clientWidth,H=c.height=c.clientHeight,g=c.getContext("2d");
+  const dot=(p,col,r)=>{if(!p)return;g.fillStyle=col;g.beginPath();g.arc(p[0]*W,p[1]*H,r,0,7);g.fill()};
+  (m.pose||[]).forEach(p=>dot(p,"#4af",3));(m.hands||[]).forEach(h=>h.forEach(p=>dot(p,"#fd4",3)))}
+const send=o=>ws&&ws.readyState===1&&ws.send(JSON.stringify(o));
+$("lang").onchange=e=>send({cmd:"lang",value:e.target.value});
+$("thr").oninput=e=>{$("thrV").textContent=e.target.value+"%"};$("thr").onchange=e=>send({cmd:"thr",value:e.target.value/100});
+$("reset").onclick=()=>send({cmd:"reset"});$("clear").onclick=()=>{text="";$("sentence").textContent=""};
+connect();
+</script></body></html>

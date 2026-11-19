@@ -1,0 +1,20 @@
+# Start the sign-language server automatically when the Pi boots.
+#   sudo cp pi/sign-language.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now sign-language
+#   journalctl -u sign-language -f          # live log
+# Edit User and the two paths if your user name or folder differ.
+[Unit]
+Description=Sign language recognition (WebSocket server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/sign_language
+ExecStart=/home/pi/sign_language/.venv/bin/python pi/ws_server.py --camera 0 --lang asl
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
